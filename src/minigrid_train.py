@@ -48,6 +48,7 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int, default=256)
     parser.add_argument("--eval-every", type=int, default=5)
     parser.add_argument("--methods", default="q_learning_strong,genetic_q_strong,cyclic_novelty,cyclic_operate_replay")
+    parser.add_argument("--method-time-limit-seconds", type=float, default=0.0)
     args = parser.parse_args()
 
     methods = {
@@ -68,16 +69,24 @@ def main() -> None:
         print(f"Running {method}...")
         rng = np.random.default_rng(args.seed + METHOD_SEED_OFFSETS[method])
         start_time = time.perf_counter()
+        args.method_deadline = start_time + args.method_time_limit_seconds if args.method_time_limit_seconds > 0 else None
         method_rows = methods[method](args, rng)
         runtime_seconds = time.perf_counter() - start_time
+        hit_time_limit = args.method_deadline is not None and runtime_seconds >= args.method_time_limit_seconds
         for row in method_rows:
             row["runtime_seconds"] = round(runtime_seconds, 4)
+            row["time_limited"] = int(hit_time_limit)
         rows.extend(method_rows)
         print(f"{method} runtime_seconds={runtime_seconds:.2f}")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_metrics_csv(args.output_dir / "metrics.csv", rows)
     print(f"Done. Outputs written to {args.output_dir}")
+
+
+def _time_expired(args) -> bool:
+    deadline = getattr(args, "method_deadline", None)
+    return deadline is not None and time.perf_counter() >= deadline
 
 
 def run_q_learning(args, rng):
@@ -97,6 +106,8 @@ def _run_q_learning(args, rng, method: str, episode_multiplier: int):
     rows = []
     env = MiniGridTabularEnv(spec)
     for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
         epsilon = max(0.05, 0.45 * (1.0 - gen / args.generations))
         episode_count = args.population * args.episodes_per_agent * episode_multiplier
         for episode in range(episode_count):
@@ -126,6 +137,8 @@ def _run_genetic_q(args, rng, method: str, episode_multiplier: int, eval_count: 
     rows = []
     env = MiniGridTabularEnv(spec)
     for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
         epsilon = max(0.05, 0.35 * (1.0 - gen / args.generations))
         for idx, agent in enumerate(population):
             for episode in range(args.episodes_per_agent * episode_multiplier):
@@ -185,6 +198,8 @@ def _run_cyclic(args, rng, method: str, use_replay: bool):
     phase_age = 0
     env = MiniGridTabularEnv(spec)
     for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
         if phase == "novelty":
             for idx, agent in enumerate(population):
                 for episode in range(args.episodes_per_agent):
@@ -256,6 +271,8 @@ def _run_cyclic_operate_replay(args, rng):
     env = MiniGridTabularEnv(spec)
 
     for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
         phase = schedule[phase_index]
         if phase.startswith("explore"):
             for idx, agent in enumerate(population):
@@ -326,6 +343,8 @@ def _run_cyclic_three_phase(args, rng):
     env = MiniGridTabularEnv(spec)
 
     for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
         phase = phases[phase_index]
         if phase == "novelty":
             for idx, agent in enumerate(population):
@@ -417,6 +436,8 @@ def _run_go_explore_lite(args, rng):
     archive.add(start.positions, start.success)
 
     for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
         attempts = args.population * args.episodes_per_agent
         for episode in range(attempts):
             base = _sample_go_explore_cell(cells, rng)
@@ -467,6 +488,8 @@ def _run_map_elites_lite(args, rng):
     env = MiniGridTabularEnv(spec)
 
     for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
         candidates = []
         if not elites:
             candidates = [QAgent(n_states, n_actions, rng) for _ in range(args.population)]

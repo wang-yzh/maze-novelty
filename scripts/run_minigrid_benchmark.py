@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=8)
     parser.add_argument("--eval-every", type=int, default=5)
     parser.add_argument("--max-steps", type=int, default=256)
+    parser.add_argument("--method-time-limit-seconds", type=float, default=0.0)
     parser.add_argument(
         "--methods",
         default="q_learning_strong,genetic_q_strong,cyclic_novelty,cyclic_operate_replay,go_explore_lite,map_elites_lite",
@@ -56,6 +57,8 @@ def main() -> None:
             str(args.eval_every),
             "--max-steps",
             str(args.max_steps),
+            "--method-time-limit-seconds",
+            str(args.method_time_limit_seconds),
             "--methods",
             args.methods,
         ]

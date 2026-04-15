@@ -157,6 +157,70 @@ This smoke run is too small to interpret model quality. It is only a check that
 runtime is captured correctly and a first signal that `genetic_q_strong` is the
 largest runtime cost.
 
+## Three-Minute Time-Limited Run
+
+This run compares only the active internal methods and lightweight external
+competitors under a wall-clock budget:
+
+```text
+3 minutes per method per seed
+```
+
+Command:
+
+```bash
+uv run python scripts/run_minigrid_benchmark.py \
+  --env-id MiniGrid-FourRooms-v0 \
+  --name time_limit_3min \
+  --seeds 7,17,27 \
+  --generations 100 \
+  --population 8 \
+  --episodes-per-agent 2 \
+  --eval-episodes 6 \
+  --eval-every 5 \
+  --method-time-limit-seconds 180 \
+  --methods cyclic_operate_replay,cyclic_novelty,map_elites_lite,go_explore_lite
+```
+
+The summarizer was updated for time-limited runs. It now selects the final row
+per `(run, method)`, because different methods can stop at different generations.
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Runtime Seconds | Time-Limited Seeds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.2222 +/- 0.0785` | `15.6667 +/- 11.6142` | `0.4039 +/- 0.0524` | `182.0962 +/- 0.8830` | `3/3` |
+| `map_elites_lite` | `0.2222 +/- 0.0785` | `19.5000 +/- 15.6897` | `0.3994 +/- 0.0251` | `181.7897 +/- 1.1568` | `3/3` |
+| `cyclic_operate_replay` | `0.2222 +/- 0.0785` | `39.6667 +/- 45.5070` | `0.3757 +/- 0.0844` | `181.2513 +/- 0.2591` | `3/3` |
+| `go_explore_lite` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.0000 +/- 0.0000` | `53.2007 +/- 1.2788` | `0/3` |
+
+Per-run best:
+
+```text
+seed 7:  cyclic_novelty
+seed 17: map_elites_lite
+seed 27: map_elites_lite
+```
+
+Final generation reached:
+
+| Seed | `cyclic_novelty` | `cyclic_operate_replay` | `map_elites_lite` | `go_explore_lite` |
+| --- | ---: | ---: | ---: | ---: |
+| `7` | `55` | `45` | `80` | `100` |
+| `17` | `50` | `45` | `80` | `100` |
+| `27` | `45` | `45` | `65` | `100` |
+
+Interpretation:
+
+- Under fixed generation count, `cyclic_operate_replay` slightly led.
+- Under fixed wall-clock budget, `cyclic_novelty` led, with `map_elites_lite`
+  very close.
+- `cyclic_operate_replay` was dragged down by seed 17, where it found a much
+  slower successful path.
+- `map_elites_lite` is stronger under time budget than the earlier fixed-count
+  comparison suggested.
+- `go_explore_lite` is fast but ineffective in this setting.
+
 ## First Real Run Result
 
 The first real run completed on:

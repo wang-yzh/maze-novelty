@@ -15,6 +15,7 @@ METRICS = [
     "archive_unique_ratio",
     "success_path_diversity",
     "runtime_seconds",
+    "time_limited",
 ]
 
 
@@ -29,10 +30,11 @@ def main() -> None:
         metrics_path = run_dir / "metrics.csv"
         with metrics_path.open() as handle:
             run_rows = list(csv.DictReader(handle))
-        max_generation = max(int(row["generation"]) for row in run_rows)
-        for row in run_rows:
-            if int(row["generation"]) == max_generation:
-                rows.append({"run": run_dir.name, **row})
+        methods = sorted({row["method"] for row in run_rows})
+        for method in methods:
+            method_rows = [row for row in run_rows if row["method"] == method]
+            final_row = max(method_rows, key=lambda row: int(row["generation"]))
+            rows.append({"run": run_dir.name, **final_row})
 
     methods = sorted({row["method"] for row in rows})
     print("Final rows")
@@ -54,6 +56,8 @@ def main() -> None:
             row.get("success_path_diversity", "n/a"),
             "runtime_seconds=",
             row.get("runtime_seconds", "n/a"),
+            "time_limited=",
+            row.get("time_limited", "n/a"),
         )
 
     print("\nAverages")

@@ -660,6 +660,32 @@ runtime_seconds
 This should be used with `test_score` when judging future rolling-training
 variants.
 
+## MiniGrid Three-Minute Time-Limited Run
+
+A follow-up run compared only:
+
+```text
+cyclic_operate_replay
+cyclic_novelty
+map_elites_lite
+go_explore_lite
+```
+
+Each method received a 180-second wall-clock budget per seed.
+
+Results over 3 seeds:
+
+| Method | Test Success | Avg Steps | Test Score | Runtime Seconds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.2222 +/- 0.0785` | `15.6667 +/- 11.6142` | `0.4039 +/- 0.0524` | `182.0962 +/- 0.8830` |
+| `map_elites_lite` | `0.2222 +/- 0.0785` | `19.5000 +/- 15.6897` | `0.3994 +/- 0.0251` | `181.7897 +/- 1.1568` |
+| `cyclic_operate_replay` | `0.2222 +/- 0.0785` | `39.6667 +/- 45.5070` | `0.3757 +/- 0.0844` | `181.2513 +/- 0.2591` |
+| `go_explore_lite` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.0000 +/- 0.0000` | `53.2007 +/- 1.2788` |
+
+This changes the interpretation: delayed replay was better in the fixed-count
+run, but `cyclic_novelty` and `map_elites_lite` were stronger under equal
+wall-clock budget.
+
 ## Reproduction Commands
 
 Setup:
