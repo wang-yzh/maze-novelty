@@ -56,3 +56,13 @@ uv run python scripts/check_env.py
 2. Summarize with `scripts/summarize_runs.py`.
 3. Copy stable conclusions into `docs/experiment_report.md`.
 4. Commit source/config/doc changes.
+
+## Long MiniGrid Runs
+
+Use the resumable runner instead of launching many manual commands:
+
+```bash
+uv run python scripts/run_minigrid_benchmark.py --env-id MiniGrid-FourRooms-v0 --name fourrooms
+```
+
+The runner skips seeds that already have `metrics.csv` and writes a summary CSV.

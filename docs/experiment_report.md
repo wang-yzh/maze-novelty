@@ -414,6 +414,65 @@ harder mazes. The cyclic method benefits from both:
    - sizes `12`, `16`, `20`.
 6. Replace tabular Q-learning with a small neural policy.
 
+## MiniGrid Pilot
+
+A first external benchmark adapter was added for MiniGrid. This is still a
+tabular experiment: MiniGrid's 7x7x3 partial observation is compressed into a
+small discrete feature vector using:
+
+- agent direction,
+- front/left/right object type,
+- whether goal/key/door/lava is visible,
+- whether the agent is carrying an object.
+
+Only three MiniGrid actions are used in the first adapter:
+
+```text
+left, right, forward
+```
+
+The first pilot used `MiniGrid-FourRooms-v0`, 3 seeds, and a deliberately light
+configuration:
+
+```text
+generations = 15
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Nonzero Success Seeds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.1667 +/- 0.0000` | `15.0000 +/- 7.8740` | `0.3741 +/- 0.0092` | `3/3` |
+| `cyclic_replay` | `0.2222 +/- 0.0785` | `66.5000 +/- 71.8830` | `0.3443 +/- 0.0416` | `3/3` |
+| `genetic_q` | `0.1111 +/- 0.1571` | `172.6667 +/- 117.8511` | `0.1588 +/- 0.2245` | `1/3` |
+| `q_learning` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.0000 +/- 0.0000` | `0/3` |
+
+Per-run best by `test_score`:
+
+```text
+cyclic_novelty: 2/3 wins
+genetic_q: 1/3 wins
+cyclic_replay: 0/3 wins by score, but 3/3 nonzero success
+q_learning: 0/3
+```
+
+Interpretation:
+
+- The custom GridWorld signal did not immediately disappear on MiniGrid.
+- The current MiniGrid adapter is very rough and computationally slow.
+- The result should be treated as a pilot, not as a definitive benchmark.
+- A more convincing MiniGrid benchmark needs stronger feature extraction or a
+  small neural policy.
+
+CSV summary:
+
+```text
+outputs/minigrid_fourrooms_pilot_summary.csv
+```
+
 ## Reproduction Commands
 
 Setup:

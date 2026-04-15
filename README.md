@@ -47,6 +47,12 @@ Hard run:
 uv run python src/train.py --config configs/hard.toml
 ```
 
+MiniGrid FourRooms pilot:
+
+```bash
+uv run python scripts/run_minigrid_benchmark.py --env-id MiniGrid-FourRooms-v0 --name fourrooms_pilot
+```
+
 Outputs are written to `outputs/`:
 
 - `metrics.csv`

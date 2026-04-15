@@ -1,0 +1,10 @@
+[experiment]
+env_id = "MiniGrid-FourRooms-v0"
+seeds = [7, 17, 27]
+generations = 50
+population = 18
+episodes_per_agent = 4
+eval_episodes = 12
+max_steps = 256
+eval_every = 5
+
