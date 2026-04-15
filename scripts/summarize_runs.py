@@ -14,6 +14,10 @@ METRICS = [
     "archive_coverage",
     "archive_unique_ratio",
     "success_path_diversity",
+    "active_niches",
+    "stress_pass_rate",
+    "replay_bank_size",
+    "motif_count",
     "runtime_seconds",
     "time_limited",
 ]
@@ -58,6 +62,10 @@ def main() -> None:
             row.get("runtime_seconds", "n/a"),
             "time_limited=",
             row.get("time_limited", "n/a"),
+            "active_niches=",
+            row.get("active_niches", "n/a"),
+            "stress_pass_rate=",
+            row.get("stress_pass_rate", "n/a"),
         )
 
     print("\nAverages")
