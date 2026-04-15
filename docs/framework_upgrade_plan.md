@@ -278,3 +278,75 @@ Interpretation:
   `cyclic_operate_replay`.
 - The ecological method likely needs schedule/ratio tuning rather than simply
   removing one component.
+
+## V0.7 Ecological Replay Variants
+
+The full ecological loop was split into three lighter variants on top of the
+`cyclic_operate_replay` baseline:
+
+```text
+cyclic_speciated_stress_replay
+cyclic_motif_oriented_radiation
+cyclic_resource_ecology_replay
+```
+
+Shared lower-level modules:
+
+- richer behavior descriptors: final region, success, speed, coverage, turn
+  pattern, revisit ratio, and progress ratio.
+- `NicheArchive`: per-descriptor elite storage with local survivor selection.
+- `MotifBank`: successful trajectory segment storage and reinforcement.
+- stress scoring and internal metrics: `active_niches`, `stress_pass_rate`,
+  `replay_bank_size`, and `motif_count`.
+
+Variant intent:
+
+- `cyclic_speciated_stress_replay`: add niche sorting and a stress gate before
+  replay.
+- `cyclic_motif_oriented_radiation`: reduce blind exploration by anchoring
+  radiation around successful motifs.
+- `cyclic_resource_ecology_replay`: add niche crowding pressure and resource
+  competition.
+
+Benchmark setup:
+
+```text
+MiniGrid-FourRooms-v0
+state_encoder = geometry
+seeds = 7, 17, 27
+generations = 100
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+eval_every = 5
+method_time_limit_seconds = 180
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Active Niches | Stress Pass Rate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `cyclic_motif_oriented_radiation` | `0.3333 +/- 0.0000` | `19.5000 +/- 6.1779` | `0.4605 +/- 0.0072` | `144.0000 +/- 14.6969` | `0.0000 +/- 0.0000` |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `8.3333 +/- 0.9428` | `0.4430 +/- 0.0438` | `0.0000 +/- 0.0000` | `0.0000 +/- 0.0000` |
+| `cyclic_speciated_stress_replay` | `0.2778 +/- 0.0785` | `8.8333 +/- 2.3921` | `0.4424 +/- 0.0443` | `100.6667 +/- 2.8674` | `0.3333 +/- 0.4714` |
+| `cyclic_resource_ecology_replay` | `0.2778 +/- 0.0785` | `10.0000 +/- 2.5495` | `0.4410 +/- 0.0425` | `112.6667 +/- 3.6818` | `0.0000 +/- 0.0000` |
+
+Per-run best:
+
+```text
+seed 7:  cyclic_speciated_stress_replay
+seed 17: cyclic_operate_replay
+seed 27: cyclic_motif_oriented_radiation
+```
+
+Interpretation:
+
+- `cyclic_motif_oriented_radiation` is the first v0.7 variant to beat
+  `cyclic_operate_replay` on average score in the 3-seed geometry benchmark.
+- `cyclic_operate_replay` remains the fastest average successful path.
+- `cyclic_speciated_stress_replay` reached the best score on seed 7 and is the
+  only variant with nonzero average stress pass rate.
+- `cyclic_resource_ecology_replay` preserved diversity but did not improve final
+  score over the baseline.
+- The result supports keeping `operate-replay` as the engineering baseline while
+  treating motif-guided radiation as the strongest new branch.

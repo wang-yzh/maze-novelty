@@ -767,6 +767,49 @@ Interpretation:
   dominant component.
 - Ecology should be treated as a promising but currently overcomplicated branch.
 
+## Ecological Replay Variants
+
+The full ecology design was split into three lighter variants and compared
+against the current `cyclic_operate_replay` baseline.
+
+Setup:
+
+```text
+MiniGrid-FourRooms-v0
+state_encoder = geometry
+seeds = 7, 17, 27
+method_time_limit_seconds = 180
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score |
+| --- | ---: | ---: | ---: |
+| `cyclic_motif_oriented_radiation` | `0.3333 +/- 0.0000` | `19.5000 +/- 6.1779` | `0.4605 +/- 0.0072` |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `8.3333 +/- 0.9428` | `0.4430 +/- 0.0438` |
+| `cyclic_speciated_stress_replay` | `0.2778 +/- 0.0785` | `8.8333 +/- 2.3921` | `0.4424 +/- 0.0443` |
+| `cyclic_resource_ecology_replay` | `0.2778 +/- 0.0785` | `10.0000 +/- 2.5495` | `0.4410 +/- 0.0425` |
+
+Per-run winners:
+
+```text
+seed 7:  cyclic_speciated_stress_replay
+seed 17: cyclic_operate_replay
+seed 27: cyclic_motif_oriented_radiation
+```
+
+Interpretation:
+
+- `cyclic_motif_oriented_radiation` produced the best average score and the only
+  flat `3/3` success rate in this comparison.
+- `cyclic_operate_replay` remains the clean speed baseline.
+- `cyclic_speciated_stress_replay` showed the clearest stress-gate signal but did
+  not yet beat the baseline on average.
+- `cyclic_resource_ecology_replay` maintained many active niches, but that
+  diversity did not convert into a score advantage.
+- The next serious direction is motif-guided radiation plus stricter speed
+  pressure, not the full ecological loop.
+
 ## Reproduction Commands
 
 Setup:
