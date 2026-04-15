@@ -224,3 +224,57 @@ Interpretation:
   - remove stress,
   - keep niche archive only,
   - compare bottleneck ratios.
+
+## Ecological Cycle Ablation: Seed 97
+
+Purpose:
+
+```text
+Use one larger seed to compare ecological ablations against the current
+cyclic_operate_replay baseline.
+```
+
+Setup:
+
+```text
+MiniGrid-FourRooms-v0
+state_encoder = geometry
+seed = 97
+generations = 100
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+eval_every = 5
+method_time_limit_seconds = 180
+```
+
+Methods:
+
+```text
+cyclic_operate_replay
+cyclic_ecology_no_motif
+cyclic_ecology_no_stress
+cyclic_ecology_niche_only
+cyclic_ecology_no_bottleneck
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Runtime Seconds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_operate_replay` | `0.3333` | `7.5000` | `0.4745` | `180.5210` |
+| `cyclic_ecology_niche_only` | `0.3333` | `78.5000` | `0.3913` | `158.5618` |
+| `cyclic_ecology_no_bottleneck` | `0.1667` | `2.0000` | `0.3893` | `181.1038` |
+| `cyclic_ecology_no_motif` | `0.1667` | `2.0000` | `0.3893` | `181.0492` |
+| `cyclic_ecology_no_stress` | `0.1667` | `2.0000` | `0.3893` | `181.1940` |
+
+Interpretation:
+
+- The current `cyclic_operate_replay` baseline clearly wins this seed.
+- `niche_only` preserves success rate but produces much slower successful paths.
+- Removing motif, stress, or bottleneck each produced a very fast successful path,
+  but at lower success rate.
+- No single ablation explains the full ecological cycle's earlier near-tie with
+  `cyclic_operate_replay`.
+- The ecological method likely needs schedule/ratio tuning rather than simply
+  removing one component.

@@ -746,6 +746,27 @@ Interpretation:
 - It does not yet clearly beat `cyclic_operate_replay`.
 - The added complexity needs ablation before it should become the main branch.
 
+## Ecological Cycle Ablation
+
+A one-seed ablation was run on seed 97 using geometry state and the same
+3-minute budget.
+
+| Method | Test Success | Avg Steps | Test Score |
+| --- | ---: | ---: | ---: |
+| `cyclic_operate_replay` | `0.3333` | `7.5000` | `0.4745` |
+| `cyclic_ecology_niche_only` | `0.3333` | `78.5000` | `0.3913` |
+| `cyclic_ecology_no_bottleneck` | `0.1667` | `2.0000` | `0.3893` |
+| `cyclic_ecology_no_motif` | `0.1667` | `2.0000` | `0.3893` |
+| `cyclic_ecology_no_stress` | `0.1667` | `2.0000` | `0.3893` |
+
+Interpretation:
+
+- `cyclic_operate_replay` clearly wins this ablation seed.
+- Niche-only exploration keeps success but is slow.
+- Removing individual ecological mechanisms does not reveal a single obviously
+  dominant component.
+- Ecology should be treated as a promising but currently overcomplicated branch.
+
 ## Reproduction Commands
 
 Setup:
