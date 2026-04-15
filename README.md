@@ -56,6 +56,11 @@ uv run python scripts/run_minigrid_benchmark.py --env-id MiniGrid-FourRooms-v0 -
 MiniGrid benchmark plan:
 
 - `docs/minigrid_benchmark_plan.md`
+- `docs/explore_operate_benchmark_plan.md`
+
+Frozen result checkpoints:
+
+- `docs/v0.3_frozen_result.md`
 
 Outputs are written to `outputs/`:
 

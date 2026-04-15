@@ -620,6 +620,37 @@ CSV summary:
 outputs/minigrid_fourrooms_strong_summary.csv
 ```
 
+## Explore-Operate-Replay Branch
+
+The next active branch deprecates the replay-heavy direction and tests:
+
+```text
+explore -> operate -> explore -> operate -> replay
+```
+
+The first MiniGrid comparison includes stronger tabular baselines plus
+lightweight Go-Explore and MAP-Elites style competitors.
+
+Result summary over 3 seeds:
+
+| Method | Test Success | Avg Steps | Test Score | Nonzero Success Seeds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_operate_replay` | `0.1667 +/- 0.0000` | `10.0000 +/- 2.9439` | `0.3799 +/- 0.0034` | `3/3` |
+| `cyclic_novelty` | `0.1667 +/- 0.0000` | `12.6667 +/- 6.2361` | `0.3768 +/- 0.0073` | `3/3` |
+| `map_elites_lite` | `0.1667 +/- 0.0000` | `26.3333 +/- 7.1336` | `0.3608 +/- 0.0083` | `3/3` |
+| `genetic_q_strong` | `0.1111 +/- 0.1571` | `173.3333 +/- 116.9083` | `0.1580 +/- 0.2234` | `1/3` |
+| `go_explore_lite` | `0.0556 +/- 0.0786` | `172.6667 +/- 117.8511` | `0.1282 +/- 0.1813` | `1/3` |
+| `q_learning_strong` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.0000 +/- 0.0000` | `0/3` |
+
+Interpretation:
+
+- `cyclic_operate_replay` slightly outperformed `cyclic_novelty` by speed.
+- `map_elites_lite` is competitive on reliability but slower.
+- `go_explore_lite` is currently too weak without a stronger robustification
+  phase.
+- The result supports continuing the delayed replay schedule, but does not yet
+  prove superiority.
+
 ## Reproduction Commands
 
 Setup:

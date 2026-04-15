@@ -20,7 +20,10 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=8)
     parser.add_argument("--eval-every", type=int, default=5)
     parser.add_argument("--max-steps", type=int, default=256)
-    parser.add_argument("--methods", default="q_learning,genetic_q,cyclic_novelty,cyclic_replay")
+    parser.add_argument(
+        "--methods",
+        default="q_learning_strong,genetic_q_strong,cyclic_novelty,cyclic_operate_replay,go_explore_lite,map_elites_lite",
+    )
     args = parser.parse_args()
 
     seeds = [int(seed.strip()) for seed in args.seeds.split(",") if seed.strip()]
