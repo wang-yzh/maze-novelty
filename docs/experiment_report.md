@@ -1,0 +1,447 @@
+# Cyclic Novelty GridWorld Experiment Report
+
+## Summary
+
+This project tests a cyclic novelty-to-exploitation training idea in a small
+GridWorld setting. The central hypothesis is:
+
+> Novelty should be used to generate diverse candidate behaviors, but a separate
+> exploitation phase must preserve and compress successful behaviors into fast,
+> reliable policies.
+
+The current implementation is intentionally simple. It uses tabular Q-learning,
+population mutation/crossover, a novelty archive, and a hall-of-fame elite bank.
+It does not use neural networks.
+
+The strongest result so far is on a harder 16x16 random-maze benchmark:
+
+- `cyclic_novelty` achieved nonzero test success in 8/10 seeds.
+- `q_learning`, `novelty_q`, and `genetic_q` achieved nonzero test success in
+  0/10 seeds.
+- Average hard-environment `test_score`:
+  - `cyclic_novelty`: `0.3010 +/- 0.0827`
+  - `genetic_q`: `0.1340 +/- 0.0080`
+  - `novelty_q`: `0.0710 +/- 0.0416`
+  - `q_learning`: `0.0530 +/- 0.0400`
+
+This is not yet a proof of a general algorithm. It is an early positive signal
+in a controlled toy environment.
+
+## Environment
+
+The environment is a square GridWorld maze.
+
+- Start: top-left cell `(0, 0)`.
+- Goal: bottom-right cell `(size - 1, size - 1)`.
+- Actions: up, down, left, right.
+- Obstacles: randomly generated, while ensuring at least one path exists.
+- Episode limit: `size * size` steps.
+- Base step reward:
+  - Each step: `-0.01`
+  - Hitting a wall: additional `-0.04`
+  - Reaching the goal: `+1.0`
+
+The agent does not receive the full maze layout. Its tabular state is a compact
+local observation:
+
+- Four wall bits: whether up, down, left, right are blocked.
+- Coarse goal direction: relative row direction and column direction, each in
+  `{less, equal, greater}`.
+
+Total observation states:
+
+```text
+16 wall patterns * 9 goal-direction patterns = 144 states
+```
+
+The archive and visualizations still use true `(row, col)` positions.
+
+## Compared Methods
+
+### 1. `q_learning`
+
+Single tabular Q-learning agent trained with the base task reward.
+
+### 2. `novelty_q`
+
+Single tabular Q-learning agent trained with the base reward plus a novelty
+bonus for visiting less-visited true positions.
+
+### 3. `genetic_q`
+
+A population of Q-tables. Each generation:
+
+1. Train each Q-table with task reward.
+2. Evaluate each individual.
+3. Select elites.
+4. Produce the next population via crossover and mutation.
+
+### 4. `cyclic_novelty`
+
+The proposed cyclic method. It alternates between:
+
+1. Novelty cultivation phase.
+2. Exploitation phase.
+
+It also keeps a hall-of-fame elite bank so useful policies are not lost during
+later novelty mutation.
+
+## Proposed Cyclic Method
+
+### Novelty Cultivation Phase
+
+Purpose:
+
+- Expand behavior diversity.
+- Discover new trajectory structures.
+- Keep candidate policies from collapsing too early.
+
+Mechanisms:
+
+- Reward includes a novelty bonus based on true-position archive visitation.
+- Novelty phase has an increasing time penalty.
+- Novelty phase ends when either:
+  - no positive gated novelty score appears for `novelty_patience` generations,
+    or
+  - novelty phase reaches `novelty_max_age = 10`.
+
+Current novelty bonus:
+
+```text
+position_bonus(position) = 1 / sqrt(1 + visits(position))
+```
+
+Current novelty bonus weight inside cyclic novelty:
+
+```text
+bonus_weight = 0.04
+```
+
+### Exploitation Phase
+
+Purpose:
+
+- Convert useful exploration into successful, fast policies.
+- Select for success and speed rather than novelty alone.
+
+Mechanisms:
+
+- More task-reward Q-learning updates are applied.
+- Evaluation uses a success-gated exploitation score.
+- Low mutation is used during exploitation.
+- A hall-of-fame elite bank is updated and reinserted into the population.
+- Exploitation runs for at least `exploit_min_age = 8` generations.
+
+Current exploitation score:
+
+```text
+speed = 1 - min(avg_steps, max_steps) / max_steps
+success_gate = success_rate^2
+
+exploitation_score =
+    0.62 * success_gate
+  + 0.28 * speed
+  + 0.10 * stability
+```
+
+The squared success term strongly favors policies that succeed across multiple
+evaluation mazes.
+
+## Final Evaluation Score
+
+All methods are evaluated with the same `test_score`:
+
+```text
+speed = 1 - min(avg_steps, max_steps) / max_steps
+
+test_score =
+    0.55 * success_rate
+  + 0.30 * speed
+  + 0.15 * stability
+```
+
+Where:
+
+- `success_rate`: fraction of test mazes solved.
+- `avg_steps`: average steps among successful episodes. If no successes, this is
+  set to `max_steps`.
+- `speed`: normalized speed score.
+- `stability`: path consistency across test mazes.
+
+Important caveat: `stability` currently rewards repeated path signatures, which
+can make a consistently failing policy look stable. This is why `success_rate`
+and `test_score` should be interpreted together.
+
+## Archive Metrics
+
+The project records three archive-related metrics:
+
+### `archive_coverage`
+
+Fraction of grid cells ever visited by archived trajectories.
+
+```text
+visited_cells / total_cells
+```
+
+This metric is easy to saturate and is not sufficient by itself.
+
+### `archive_unique_ratio`
+
+Fraction of archived trajectories that are unique.
+
+```text
+unique_trajectories / total_archived_trajectories
+```
+
+This helps distinguish repeated behavior from broad exploration.
+
+### `success_path_diversity`
+
+Fraction of successful archived trajectories that are unique.
+
+```text
+unique_success_trajectories / total_success_trajectories
+```
+
+This tries to capture whether the method finds multiple distinct successful
+routes, not just many failed paths.
+
+## Experiment Configurations
+
+### Default Configuration
+
+File: `configs/default.toml`
+
+```toml
+size = 12
+train_mazes = 18
+test_mazes = 8
+generations = 45
+population = 18
+episodes_per_agent = 5
+eval_every = 3
+novelty_patience = 5
+obstacle_prob = 0.22
+```
+
+Seeds:
+
+```text
+7, 17, 27, 37, 47, 57, 67, 77, 87, 97
+```
+
+### Hard Configuration
+
+File: `configs/hard.toml`
+
+```toml
+size = 16
+train_mazes = 30
+test_mazes = 16
+generations = 80
+population = 24
+episodes_per_agent = 6
+eval_every = 5
+novelty_patience = 5
+obstacle_prob = 0.28
+```
+
+Seeds:
+
+```text
+7, 17, 27, 37, 47, 57, 67, 77, 87, 97
+```
+
+## Default 12x12 Results
+
+Final averages over 10 seeds:
+
+| Method | Test Success | Avg Steps | Test Score | Nonzero Success Seeds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.3375 +/- 0.0800` | `22.4000 +/- 0.6799` | `0.4411 +/- 0.0393` | `10/10` |
+| `genetic_q` | `0.1000 +/- 0.1458` | `95.2000 +/- 59.7675` | `0.2338 +/- 0.1468` | `3/10` |
+| `q_learning` | `0.1125 +/- 0.1038` | `71.0000 +/- 59.6070` | `0.2247 +/- 0.1730` | `5/10` |
+| `novelty_q` | `0.0125 +/- 0.0375` | `131.8000 +/- 36.6000` | `0.0816 +/- 0.0932` | `1/10` |
+
+Per-run best by `test_score`:
+
+```text
+cyclic_novelty: 8/10 clear wins
+genetic_q: 2/10 best by tie-breaking, effectively tied with cyclic_novelty
+q_learning: 0/10
+novelty_q: 0/10
+```
+
+CSV summary:
+
+```text
+outputs/ten_seed_summary.csv
+```
+
+## Hard 16x16 Results
+
+Final averages over 10 seeds:
+
+| Method | Test Success | Avg Steps | Test Score | Nonzero Success Seeds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.0813 +/- 0.0628` | `75.6333 +/- 90.1853` | `0.3010 +/- 0.0827` | `8/10` |
+| `genetic_q` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.1340 +/- 0.0080` | `0/10` |
+| `novelty_q` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.0710 +/- 0.0416` | `0/10` |
+| `q_learning` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.0530 +/- 0.0400` | `0/10` |
+
+Per-run best by `test_score`:
+
+```text
+cyclic_novelty: 8/10 clear wins
+genetic_q: 1/10 clear win
+cyclic_novelty and genetic_q: 1/10 tied at 0.15
+q_learning: 0/10
+novelty_q: 0/10
+```
+
+CSV summary:
+
+```text
+outputs/hard_summary.csv
+```
+
+## Hard Ablation: Replay and Restart
+
+After the hard benchmark, four cyclic variants were tested:
+
+| Variant | Replay Bank | Reproducibility Restart |
+| --- | ---: | ---: |
+| `cyclic_novelty` | no | no |
+| `cyclic_replay` | yes | no |
+| `cyclic_restart` | no | yes |
+| `cyclic_replay_restart` | yes | yes |
+
+The replay bank stores successful trajectories and reinforces their
+state-action pairs during exploitation. Restart reconstructs the population from
+hall-of-fame elites, replay-seeded policies, strongly mutated elites, and random
+new policies when exploitation fails to reach a minimum success threshold.
+
+The method RNG was changed to use fixed per-method offsets so subset runs are
+not affected by method order.
+
+Final hard ablation averages over 10 seeds:
+
+| Method | Test Success | Avg Steps | Test Score | Nonzero Success Seeds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_replay` | `0.0938 +/- 0.0576` | `75.4667 +/- 90.2686` | `0.3141 +/- 0.0854` | `8/10` |
+| `cyclic_novelty` | `0.0813 +/- 0.0628` | `98.1000 +/- 103.3716` | `0.2817 +/- 0.0903` | `7/10` |
+| `cyclic_replay_restart` | `0.0688 +/- 0.0710` | `98.0500 +/- 103.4042` | `0.2779 +/- 0.0927` | `7/10` |
+| `cyclic_restart` | `0.0625 +/- 0.0839` | `143.4000 +/- 112.6021` | `0.2403 +/- 0.1071` | `5/10` |
+
+Per-run best by `test_score`:
+
+```text
+cyclic_replay: 5/10 wins
+cyclic_novelty: 2/10 wins
+cyclic_replay_restart: 2/10 wins
+cyclic_restart: 1/10 wins
+```
+
+Current interpretation:
+
+- Success replay is beneficial in the hard environment.
+- Restart alone is not reliably beneficial in its current form.
+- Replay plus restart does not yet outperform replay alone, suggesting the
+  restart trigger or reconstruction mix is too disruptive.
+
+CSV summary:
+
+```text
+outputs/ablation_hard_stable_summary.csv
+```
+
+## Interpretation
+
+The current evidence supports a limited claim:
+
+> In these tabular GridWorld experiments, cyclic novelty cultivation followed by
+> exploitation and elite preservation outperforms simple Q-learning, novelty
+> Q-learning, and a basic genetic Q-learning baseline.
+
+The hard benchmark is especially informative because all baselines had zero
+test success across 10 seeds, while `cyclic_novelty` solved at least one test
+maze in 8/10 seeds.
+
+The likely reason is that pure novelty expands behavior but does not preserve
+useful solutions, while pure exploitation struggles to find sparse paths in
+harder mazes. The cyclic method benefits from both:
+
+- novelty creates diverse candidate trajectories,
+- exploitation selects for success and speed,
+- hall-of-fame prevents discovered solutions from being destroyed.
+
+## Current Limitations
+
+1. This is still a toy environment.
+2. Policies are tabular Q-tables, not neural policies.
+3. Baselines are simple and not tuned aggressively.
+4. `stability` needs refinement, because stable failure can be rewarded.
+5. The local observation design may bias which methods perform well.
+6. Success rates on hard mazes are still low in absolute terms.
+7. No statistical significance test has been run yet.
+8. No ablation study has isolated the individual contribution of:
+   - cyclic phase switching,
+   - novelty bonus,
+   - time penalty,
+   - hall-of-fame,
+   - exploitation score.
+
+## Suggested Next Experiments
+
+1. Ablation study:
+   - no hall-of-fame,
+   - no novelty phase,
+   - no time penalty,
+   - no success-gated exploitation score.
+2. Improve restart:
+   - trigger only after repeated validation failure,
+   - preserve more replay-seeded elites,
+   - reduce random population injection when replay exists.
+3. Stronger baselines:
+   - more episodes for Q-learning,
+   - tuned genetic Q-learning,
+   - MiniGrid baselines.
+4. Larger held-out test set:
+   - 50 or 100 test mazes per seed.
+5. Alternative maze difficulty:
+   - obstacle rates from `0.20` to `0.35`,
+   - sizes `12`, `16`, `20`.
+6. Replace tabular Q-learning with a small neural policy.
+
+## Reproduction Commands
+
+Setup:
+
+```bash
+uv sync
+```
+
+Environment check:
+
+```bash
+uv run python scripts/check_env.py
+```
+
+Run one default experiment:
+
+```bash
+uv run python src/train.py --config configs/default.toml --seed 7 --output-dir outputs/example_default
+```
+
+Run one hard experiment:
+
+```bash
+uv run python src/train.py --config configs/hard.toml --seed 7 --output-dir outputs/example_hard
+```
+
+Summarize multiple runs:
+
+```bash
+uv run python scripts/summarize_runs.py outputs/hard_seed_7 outputs/hard_seed_17 --csv-out outputs/example_summary.csv
+```

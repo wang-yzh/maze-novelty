@@ -1,0 +1,17 @@
+# This project is managed with uv.
+# Prefer:
+#
+#   uv sync
+#
+# requirements.txt is kept only as a lightweight fallback/reference.
+numpy
+matplotlib
+pandas
+scipy
+scikit-learn
+seaborn
+tqdm
+rich
+gymnasium
+minigrid
+networkx

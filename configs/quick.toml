@@ -1,0 +1,13 @@
+[experiment]
+seed = 7
+size = 12
+train_mazes = 8
+test_mazes = 4
+generations = 9
+population = 8
+episodes_per_agent = 2
+eval_every = 3
+novelty_patience = 5
+obstacle_prob = 0.20
+make_plots = false
+
