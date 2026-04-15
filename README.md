@@ -75,6 +75,7 @@ Current experiment report:
 Versioning notes:
 
 - `docs/versioning.md`
+- `docs/framework_upgrade_plan.md`
 
 The experiment is intentionally small and dependency-light. It is meant to test
 whether the training loop produces useful behavior before moving to larger

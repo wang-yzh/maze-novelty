@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +14,8 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 import numpy as np
 
 from agents import QAgent, Rollout
+from core.budget import MethodBudget
+from core.recording import annotate_method_rows
 from evolution import EvalResult, evolve_population, exploitation_score
 from minigrid_adapter import MiniGridSpec, MiniGridTabularEnv
 from novelty import NoveltyArchive
@@ -68,14 +69,9 @@ def main() -> None:
     for method in requested:
         print(f"Running {method}...")
         rng = np.random.default_rng(args.seed + METHOD_SEED_OFFSETS[method])
-        start_time = time.perf_counter()
-        args.method_deadline = start_time + args.method_time_limit_seconds if args.method_time_limit_seconds > 0 else None
+        args.method_budget = MethodBudget.from_seconds(args.method_time_limit_seconds).start()
         method_rows = methods[method](args, rng)
-        runtime_seconds = time.perf_counter() - start_time
-        hit_time_limit = args.method_deadline is not None and runtime_seconds >= args.method_time_limit_seconds
-        for row in method_rows:
-            row["runtime_seconds"] = round(runtime_seconds, 4)
-            row["time_limited"] = int(hit_time_limit)
+        method_rows, runtime_seconds = annotate_method_rows(method_rows, args.method_budget)
         rows.extend(method_rows)
         print(f"{method} runtime_seconds={runtime_seconds:.2f}")
 
@@ -85,8 +81,8 @@ def main() -> None:
 
 
 def _time_expired(args) -> bool:
-    deadline = getattr(args, "method_deadline", None)
-    return deadline is not None and time.perf_counter() >= deadline
+    budget = getattr(args, "method_budget", None)
+    return bool(budget is not None and budget.expired())
 
 
 def run_q_learning(args, rng):
