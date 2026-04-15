@@ -53,6 +53,10 @@ MiniGrid FourRooms pilot:
 uv run python scripts/run_minigrid_benchmark.py --env-id MiniGrid-FourRooms-v0 --name fourrooms_pilot
 ```
 
+MiniGrid benchmark plan:
+
+- `docs/minigrid_benchmark_plan.md`
+
 Outputs are written to `outputs/`:
 
 - `metrics.csv`

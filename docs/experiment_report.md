@@ -376,6 +376,91 @@ harder mazes. The cyclic method benefits from both:
 - exploitation selects for success and speed,
 - hall-of-fame prevents discovered solutions from being destroyed.
 
+## Revised Cycle Interpretation
+
+The MiniGrid pilot exposed an important trade-off:
+
+- `cyclic_novelty` tended to produce faster successful paths.
+- `cyclic_replay` tended to produce more nonzero successes, but with slower
+  average paths.
+
+The correct interpretation is not to make replay a speed-optimized RL replay
+buffer. That would collapse the method back toward ordinary reinforcement
+learning. Instead, replay should be treated as an independent cycle:
+
+```text
+novelty cycle -> replay cycle -> exploitation cycle
+```
+
+Each cycle has a separate role:
+
+### Novelty Cycle
+
+Purpose:
+
+```text
+Generate diverse candidate behavior.
+```
+
+It should emphasize:
+
+- novelty,
+- trajectory diversity,
+- broad exploration,
+- weak success signal.
+
+It should not aggressively optimize speed.
+
+### Replay Cycle
+
+Purpose:
+
+```text
+Test whether discovered successes can be reproduced.
+```
+
+It should emphasize:
+
+- repeated success,
+- remembering successful state-action traces,
+- robustness of discovered behaviors.
+
+It should not directly optimize for the shortest path. Otherwise replay and
+exploitation become the same phase.
+
+### Exploitation Cycle
+
+Purpose:
+
+```text
+Compress reproducible successful behavior into faster policies.
+```
+
+It should emphasize:
+
+- success rate,
+- speed,
+- stability,
+- elite preservation.
+
+This phase is where "fast and correct" should dominate.
+
+### Gate / Restart Logic
+
+Restart should not be a blunt reset. Current ablation suggests that restart
+alone is too disruptive. Future restart logic should be gated by replay failure:
+
+```text
+If novelty finds candidates but replay cannot reproduce success:
+    continue replay or return to novelty.
+
+If replay reproduces success but exploitation cannot improve speed:
+    continue exploitation.
+
+If all phases stall:
+    restart part of the population while preserving replay-confirmed elites.
+```
+
 ## Current Limitations
 
 1. This is still a toy environment.
@@ -471,6 +556,68 @@ CSV summary:
 
 ```text
 outputs/minigrid_fourrooms_pilot_summary.csv
+```
+
+## MiniGrid Strong-Baseline Pilot
+
+To avoid using overly weak traditional baselines, a stronger MiniGrid benchmark
+was run with:
+
+- `q_learning_strong`: 4x training episodes per generation.
+- `genetic_q_strong`: 2x training episodes per individual plus stronger
+  evaluation and lower mutation.
+- `cyclic_three_phase`: explicit novelty -> replay -> exploitation cycles.
+
+Task:
+
+```text
+MiniGrid-FourRooms-v0
+```
+
+Configuration:
+
+```text
+seeds = 7, 17, 27
+generations = 20
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Nonzero Success Seeds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.1667 +/- 0.0000` | `12.6667 +/- 6.2361` | `0.3768 +/- 0.0073` | `3/3` |
+| `cyclic_three_phase` | `0.1667 +/- 0.0000` | `17.6667 +/- 8.3799` | `0.3710 +/- 0.0098` | `3/3` |
+| `cyclic_replay` | `0.1667 +/- 0.0000` | `22.6667 +/- 21.4838` | `0.3651 +/- 0.0251` | `3/3` |
+| `genetic_q_strong` | `0.1111 +/- 0.1571` | `173.3333 +/- 116.9083` | `0.1580 +/- 0.2234` | `1/3` |
+| `q_learning_strong` | `0.0000 +/- 0.0000` | `256.0000 +/- 0.0000` | `0.0000 +/- 0.0000` | `0/3` |
+
+Per-run best by `test_score`:
+
+```text
+cyclic_novelty: 1/3 wins
+cyclic_replay: 1/3 wins
+genetic_q_strong: 1/3 wins
+cyclic_three_phase: 0/3 wins
+q_learning_strong: 0/3 wins
+```
+
+Interpretation:
+
+- The cyclic methods still survive after strengthening the traditional
+  baselines.
+- `cyclic_three_phase` is viable but not yet better than the simpler cyclic
+  variants.
+- `cyclic_novelty` remains the fastest of the cyclic methods in this pilot.
+- More MiniGrid work should focus on better observation features and a larger
+  but resumable benchmark run.
+
+CSV summary:
+
+```text
+outputs/minigrid_fourrooms_strong_summary.csv
 ```
 
 ## Reproduction Commands
