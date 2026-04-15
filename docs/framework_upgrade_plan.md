@@ -146,3 +146,34 @@ exploit
 
 Every refactor step must preserve a runnable benchmark. Do not break historical
 tags; add new runners or compatibility wrappers where needed.
+
+## Ecological Cycle Variant
+
+An experimental method was added:
+
+```text
+cyclic_ecology
+```
+
+It tests an ecological pressure schedule:
+
+```text
+radiation -> niche -> stress -> bottleneck -> reradiation -> consolidation
+```
+
+Implemented mechanisms:
+
+- `NicheArchive`: stores elites by behavior descriptor.
+- `MotifBank`: extracts short successful trajectory segments.
+- stress evaluation: reduced step budget and shifted evaluation seeds.
+- bottleneck reconstruction: stress survivors, niche elites, mutated champions,
+  and a small amount of fresh population.
+- consolidation: success replay plus motif reinforcement.
+
+Smoke command:
+
+```bash
+uv run python src/minigrid_train.py --env-id MiniGrid-FourRooms-v0 --seed 7 --output-dir outputs/ecology_smoke --generations 12 --population 6 --episodes-per-agent 1 --eval-episodes 3 --eval-every 3 --state-encoder geometry --method-time-limit-seconds 20 --methods cyclic_ecology
+```
+
+The smoke run completed successfully.
