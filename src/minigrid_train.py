@@ -33,6 +33,10 @@ METHOD_SEED_OFFSETS = {
     "cyclic_three_phase": 557,
     "cyclic_operate_replay": 601,
     "cyclic_ecology": 653,
+    "cyclic_ecology_no_motif": 661,
+    "cyclic_ecology_no_stress": 673,
+    "cyclic_ecology_niche_only": 677,
+    "cyclic_ecology_no_bottleneck": 683,
     "go_explore_lite": 701,
     "map_elites_lite": 809,
 }
@@ -64,6 +68,10 @@ def main() -> None:
         "cyclic_three_phase": run_cyclic_three_phase,
         "cyclic_operate_replay": run_cyclic_operate_replay,
         "cyclic_ecology": run_cyclic_ecology,
+        "cyclic_ecology_no_motif": run_cyclic_ecology_no_motif,
+        "cyclic_ecology_no_stress": run_cyclic_ecology_no_stress,
+        "cyclic_ecology_niche_only": run_cyclic_ecology_niche_only,
+        "cyclic_ecology_no_bottleneck": run_cyclic_ecology_no_bottleneck,
         "go_explore_lite": run_go_explore_lite,
         "map_elites_lite": run_map_elites_lite,
     }
@@ -179,7 +187,31 @@ def run_cyclic_operate_replay(args, rng):
 
 
 def run_cyclic_ecology(args, rng):
-    return _run_cyclic_ecology(args, rng)
+    return _run_cyclic_ecology(args, rng, method="cyclic_ecology")
+
+
+def run_cyclic_ecology_no_motif(args, rng):
+    return _run_cyclic_ecology(args, rng, method="cyclic_ecology_no_motif", use_motif=False)
+
+
+def run_cyclic_ecology_no_stress(args, rng):
+    return _run_cyclic_ecology(args, rng, method="cyclic_ecology_no_stress", use_stress=False)
+
+
+def run_cyclic_ecology_niche_only(args, rng):
+    return _run_cyclic_ecology(
+        args,
+        rng,
+        method="cyclic_ecology_niche_only",
+        use_motif=False,
+        use_stress=False,
+        use_bottleneck=False,
+        niche_only=True,
+    )
+
+
+def run_cyclic_ecology_no_bottleneck(args, rng):
+    return _run_cyclic_ecology(args, rng, method="cyclic_ecology_no_bottleneck", use_bottleneck=False)
 
 
 def run_go_explore_lite(args, rng):
@@ -399,8 +431,15 @@ class MotifBank:
         return len(self.items)
 
 
-def _run_cyclic_ecology(args, rng):
-    method = "cyclic_ecology"
+def _run_cyclic_ecology(
+    args,
+    rng,
+    method: str,
+    use_motif: bool = True,
+    use_stress: bool = True,
+    use_bottleneck: bool = True,
+    niche_only: bool = False,
+):
     spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     population = [QAgent(probe.n_states, probe.n_actions, rng) for _ in range(args.population)]
@@ -412,7 +451,7 @@ def _run_cyclic_ecology(args, rng):
     hall_of_fame = [agent.clone() for agent in population[: max(2, args.population // 6)]]
     stress_survivors = [agent.clone() for agent in hall_of_fame]
     rows = []
-    schedule = ("radiation", "niche", "stress", "bottleneck", "reradiation", "consolidation")
+    schedule = ("radiation", "niche", "reradiation", "niche") if niche_only else ("radiation", "niche", "stress", "bottleneck", "reradiation", "consolidation")
     phase_index = 0
     phase_age = 0
     phase_len = 4
@@ -442,7 +481,8 @@ def _run_cyclic_ecology(args, rng):
                     )
                     archive.add(rollout.positions, rollout.success)
                     replay_bank.add(rollout)
-                    motif_bank.add_success(rollout)
+                    if use_motif:
+                        motif_bank.add_success(rollout)
                     novelty = archive.trajectory_novelty(rollout.positions)
                     coverage = len(set(rollout.positions)) / args.max_steps
                     speed = 1.0 - min(rollout.steps, args.max_steps) / args.max_steps
@@ -470,9 +510,14 @@ def _run_cyclic_ecology(args, rng):
                     rollout = _run_minigrid_episode(args, env, agent, rng, epsilon, True, gen, idx * 100 + episode)
                     archive.add(rollout.positions, rollout.success)
                     replay_bank.add(rollout)
-                    motif_bank.add_success(rollout)
-            results = [_evaluate_minigrid_stress(args, agent, rng, gen, eval_episodes=4) for agent in population]
-            scores = [_stress_score(result, args.max_steps) for result in results]
+                    if use_motif:
+                        motif_bank.add_success(rollout)
+            if use_stress:
+                results = [_evaluate_minigrid_stress(args, agent, rng, gen, eval_episodes=4) for agent in population]
+                scores = [_stress_score(result, args.max_steps) for result in results]
+            else:
+                results = [_evaluate_minigrid(args, agent, rng, eval_episodes=4) for agent in population]
+                scores = [exploitation_score(result, args.max_steps) for result in results]
             order = np.argsort(scores)[::-1]
             stress_survivors = [population[int(index)].clone() for index in order[: max(2, args.population // 4)]]
             hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
@@ -480,7 +525,12 @@ def _run_cyclic_ecology(args, rng):
             population[: len(stress_survivors)] = [agent.clone() for agent in stress_survivors]
 
         elif phase == "bottleneck":
-            population = _ecology_bottleneck(args, population, stress_survivors, niche_archive, hall_of_fame, rng, probe.n_states)
+            if use_bottleneck:
+                population = _ecology_bottleneck(args, population, stress_survivors, niche_archive, hall_of_fame, rng, probe.n_states)
+            else:
+                candidates = stress_survivors + niche_archive.best(max(2, args.population // 4)) + hall_of_fame + population
+                scores = [_evaluate_minigrid(args, agent, rng, eval_episodes=4).score for agent in candidates]
+                population = evolve_population(candidates[: args.population], scores[: args.population], rng, mutation_scale=0.04, mutation_rate=0.05)
 
         elif phase == "reradiation":
             scores = []
@@ -500,7 +550,8 @@ def _run_cyclic_ecology(args, rng):
                     )
                     archive.add(rollout.positions, rollout.success)
                     replay_bank.add(rollout)
-                    motif_bank.add_success(rollout)
+                    if use_motif:
+                        motif_bank.add_success(rollout)
                 result = _evaluate_minigrid(args, agent, rng, eval_episodes=4)
                 novelty = archive.trajectory_novelty(result.best_rollout.positions)
                 scores.append(0.35 * result.score + 0.35 * novelty + 0.30 * result.success_rate)
@@ -509,7 +560,8 @@ def _run_cyclic_ecology(args, rng):
         else:
             for agent in population:
                 replay_bank.reinforce(agent, rng, passes=4, reward=0.09)
-                motif_bank.reinforce(agent, rng, passes=3, reward=0.07)
+                if use_motif:
+                    motif_bank.reinforce(agent, rng, passes=3, reward=0.07)
             results = [_evaluate_minigrid(args, agent, rng, eval_episodes=6) for agent in population]
             scores = [exploitation_score(result, args.max_steps) + 0.05 * result.success_rate for result in results]
             hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
