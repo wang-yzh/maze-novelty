@@ -177,3 +177,50 @@ uv run python src/minigrid_train.py --env-id MiniGrid-FourRooms-v0 --seed 7 --ou
 ```
 
 The smoke run completed successfully.
+
+## Ecological Cycle Benchmark
+
+Comparison setup:
+
+```text
+MiniGrid-FourRooms-v0
+state_encoder = geometry
+seeds = 7, 17, 27
+generations = 100
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+eval_every = 5
+method_time_limit_seconds = 180
+methods = cyclic_novelty, cyclic_operate_replay, map_elites_lite, cyclic_ecology
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Runtime Seconds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `8.3333 +/- 0.9428` | `0.4430 +/- 0.0438` | `180.6715 +/- 0.5636` |
+| `cyclic_ecology` | `0.2778 +/- 0.0785` | `9.0000 +/- 1.6330` | `0.4422 +/- 0.0432` | `181.5018 +/- 1.3472` |
+| `cyclic_novelty` | `0.2778 +/- 0.0785` | `14.0000 +/- 5.6716` | `0.4364 +/- 0.0498` | `180.8439 +/- 0.4611` |
+| `map_elites_lite` | `0.3333 +/- 0.1361` | `53.9444 +/- 25.5061` | `0.4201 +/- 0.0451` | `182.5798 +/- 2.7146` |
+
+Per-run best:
+
+```text
+seed 7:  cyclic_ecology
+seed 17: cyclic_operate_replay
+seed 27: cyclic_ecology and cyclic_operate_replay tied by score
+```
+
+Interpretation:
+
+- `cyclic_ecology` is viable on the first implementation.
+- It nearly matches the current best `cyclic_operate_replay`, but does not clearly
+  beat it on average.
+- Its average successful path length is stable and short.
+- The extra ecological phases are not yet obviously worth their complexity.
+- The next useful step is ablation, especially:
+  - remove motif consolidation,
+  - remove stress,
+  - keep niche archive only,
+  - compare bottleneck ratios.

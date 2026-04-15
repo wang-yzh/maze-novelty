@@ -715,6 +715,37 @@ Interpretation:
 - This suggests the previous compact state was a real bottleneck for delayed
   replay.
 
+## Ecological Cycle Pilot
+
+An ecological cycle variant was tested:
+
+```text
+radiation -> niche -> stress -> bottleneck -> reradiation -> consolidation
+```
+
+It adds:
+
+- niche archive,
+- stress evaluation,
+- bottleneck reconstruction,
+- re-radiation from survivors,
+- motif consolidation.
+
+Result under geometry state and a 3-minute budget:
+
+| Method | Test Success | Avg Steps | Test Score |
+| --- | ---: | ---: | ---: |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `8.3333 +/- 0.9428` | `0.4430 +/- 0.0438` |
+| `cyclic_ecology` | `0.2778 +/- 0.0785` | `9.0000 +/- 1.6330` | `0.4422 +/- 0.0432` |
+| `cyclic_novelty` | `0.2778 +/- 0.0785` | `14.0000 +/- 5.6716` | `0.4364 +/- 0.0498` |
+| `map_elites_lite` | `0.3333 +/- 0.1361` | `53.9444 +/- 25.5061` | `0.4201 +/- 0.0451` |
+
+Interpretation:
+
+- The ecological cycle is viable immediately, which is a positive signal.
+- It does not yet clearly beat `cyclic_operate_replay`.
+- The added complexity needs ablation before it should become the main branch.
+
 ## Reproduction Commands
 
 Setup:
