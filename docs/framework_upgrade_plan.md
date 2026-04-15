@@ -76,6 +76,50 @@ uv run python src/minigrid_train.py --env-id MiniGrid-FourRooms-v0 --seed 7 --ou
 
 Both completed successfully.
 
+## State Encoder Time-Limited Comparison
+
+Comparison setup:
+
+```text
+MiniGrid-FourRooms-v0
+seeds = 7, 17, 27
+generations = 100
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+eval_every = 5
+method_time_limit_seconds = 180
+methods = cyclic_novelty, cyclic_operate_replay, map_elites_lite
+```
+
+Compact encoder results:
+
+| Method | Test Success | Avg Steps | Test Score | Runtime Seconds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.2222 +/- 0.0785` | `22.6667 +/- 21.4838` | `0.3957 +/- 0.0608` | `182.0284 +/- 1.2429` |
+| `map_elites_lite` | `0.1667 +/- 0.0000` | `11.6667 +/- 4.9216` | `0.3780 +/- 0.0057` | `182.8052 +/- 1.8750` |
+| `cyclic_operate_replay` | `0.2222 +/- 0.0785` | `39.6667 +/- 45.5070` | `0.3757 +/- 0.0844` | `181.6400 +/- 1.4099` |
+
+Geometry encoder results:
+
+| Method | Test Success | Avg Steps | Test Score | Runtime Seconds |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `8.3333 +/- 0.9428` | `0.4430 +/- 0.0438` | `181.1481 +/- 0.5796` |
+| `cyclic_novelty` | `0.2778 +/- 0.0785` | `13.0000 +/- 6.5701` | `0.4375 +/- 0.0507` | `181.1778 +/- 0.4350` |
+| `map_elites_lite` | `0.3333 +/- 0.1361` | `61.6111 +/- 27.0303` | `0.4111 +/- 0.0463` | `180.8006 +/- 0.5870` |
+
+Interpretation:
+
+- Geometry state improves all three methods under a fixed time budget.
+- `cyclic_operate_replay` benefits the most, moving from `0.3757` to `0.4430`.
+- Under compact state, fixed-time comparison favored `cyclic_novelty`.
+- Under geometry state, `cyclic_operate_replay` becomes the best average method.
+- `map_elites_lite` reaches the highest average success rate under geometry, but
+  its successful paths are slower.
+
+This strongly suggests the delayed replay method was being constrained by the
+older compact state representation.
+
 ## Next Steps
 
 1. Extract a real `Method` class interface.

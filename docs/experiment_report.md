@@ -686,6 +686,35 @@ This changes the interpretation: delayed replay was better in the fixed-count
 run, but `cyclic_novelty` and `map_elites_lite` were stronger under equal
 wall-clock budget.
 
+## MiniGrid State Encoder Comparison
+
+After extracting MiniGrid state encoders, compact and geometry state
+representations were compared under the same 3-minute-per-method budget.
+
+Compact state:
+
+| Method | Test Success | Avg Steps | Test Score |
+| --- | ---: | ---: | ---: |
+| `cyclic_novelty` | `0.2222 +/- 0.0785` | `22.6667 +/- 21.4838` | `0.3957 +/- 0.0608` |
+| `map_elites_lite` | `0.1667 +/- 0.0000` | `11.6667 +/- 4.9216` | `0.3780 +/- 0.0057` |
+| `cyclic_operate_replay` | `0.2222 +/- 0.0785` | `39.6667 +/- 45.5070` | `0.3757 +/- 0.0844` |
+
+Geometry state:
+
+| Method | Test Success | Avg Steps | Test Score |
+| --- | ---: | ---: | ---: |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `8.3333 +/- 0.9428` | `0.4430 +/- 0.0438` |
+| `cyclic_novelty` | `0.2778 +/- 0.0785` | `13.0000 +/- 6.5701` | `0.4375 +/- 0.0507` |
+| `map_elites_lite` | `0.3333 +/- 0.1361` | `61.6111 +/- 27.0303` | `0.4111 +/- 0.0463` |
+
+Interpretation:
+
+- Geometry state representation improved every tested method.
+- `cyclic_operate_replay` improved the most and became the best average method
+  under the fixed-time budget.
+- This suggests the previous compact state was a real bottleneck for delayed
+  replay.
+
 ## Reproduction Commands
 
 Setup:
