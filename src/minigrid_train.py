@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,7 +67,13 @@ def main() -> None:
     for method in requested:
         print(f"Running {method}...")
         rng = np.random.default_rng(args.seed + METHOD_SEED_OFFSETS[method])
-        rows.extend(methods[method](args, rng))
+        start_time = time.perf_counter()
+        method_rows = methods[method](args, rng)
+        runtime_seconds = time.perf_counter() - start_time
+        for row in method_rows:
+            row["runtime_seconds"] = round(runtime_seconds, 4)
+        rows.extend(method_rows)
+        print(f"{method} runtime_seconds={runtime_seconds:.2f}")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_metrics_csv(args.output_dir / "metrics.csv", rows)

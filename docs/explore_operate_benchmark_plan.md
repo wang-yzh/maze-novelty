@@ -113,6 +113,49 @@ uv run python scripts/run_minigrid_benchmark.py \
    than our current novelty pressure.
 3. If `map_elites_lite` wins, the QD framing may be the better research family.
 4. If all methods are weak, improve MiniGrid observation features before scaling.
+5. Compare `runtime_seconds` together with score. A method that only wins by
+   spending far more wall-clock time is less useful for rolling training.
+
+## Runtime Profiling
+
+MiniGrid runs now record method-level wall-clock time:
+
+```text
+runtime_seconds
+```
+
+The field is written into each method row in `metrics.csv` and summarized by
+`scripts/summarize_runs.py`.
+
+Runtime smoke command:
+
+```bash
+uv run python scripts/run_minigrid_benchmark.py \
+  --env-id MiniGrid-FourRooms-v0 \
+  --name runtime_smoke \
+  --seeds 7 \
+  --generations 3 \
+  --population 4 \
+  --episodes-per-agent 1 \
+  --eval-episodes 3 \
+  --eval-every 3 \
+  --methods q_learning_strong,genetic_q_strong,cyclic_novelty,cyclic_operate_replay,go_explore_lite,map_elites_lite
+```
+
+Smoke runtime result:
+
+| Method | Runtime Seconds |
+| --- | ---: |
+| `genetic_q_strong` | `7.1351` |
+| `cyclic_operate_replay` | `4.0111` |
+| `cyclic_novelty` | `3.8735` |
+| `map_elites_lite` | `3.4240` |
+| `q_learning_strong` | `1.8786` |
+| `go_explore_lite` | `0.7342` |
+
+This smoke run is too small to interpret model quality. It is only a check that
+runtime is captured correctly and a first signal that `genetic_q_strong` is the
+largest runtime cost.
 
 ## First Real Run Result
 

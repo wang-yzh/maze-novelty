@@ -14,6 +14,7 @@ METRICS = [
     "archive_coverage",
     "archive_unique_ratio",
     "success_path_diversity",
+    "runtime_seconds",
 ]
 
 
@@ -51,6 +52,8 @@ def main() -> None:
             row.get("archive_unique_ratio", "n/a"),
             "success_diversity=",
             row.get("success_path_diversity", "n/a"),
+            "runtime_seconds=",
+            row.get("runtime_seconds", "n/a"),
         )
 
     print("\nAverages")

@@ -651,6 +651,15 @@ Interpretation:
 - The result supports continuing the delayed replay schedule, but does not yet
   prove superiority.
 
+Runtime profiling was added after this result. New MiniGrid runs include:
+
+```text
+runtime_seconds
+```
+
+This should be used with `test_score` when judging future rolling-training
+variants.
+
 ## Reproduction Commands
 
 Setup:
