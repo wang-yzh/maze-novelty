@@ -48,6 +48,34 @@ Responsibilities:
 The existing MiniGrid algorithms are intentionally left in place so benchmark
 behavior remains comparable to `v0.4.2-time-limited-benchmark`.
 
+## Step 2: State Encoder Extraction
+
+MiniGrid state encoding is now selectable:
+
+```text
+--state-encoder compact
+--state-encoder geometry
+```
+
+Encoders:
+
+- `MiniGridCompactEncoder`: the historical feature set.
+- `MiniGridGeometryEncoder`: local geometry, visible-goal direction, topology
+  type, and last action.
+
+This makes state representation an explicit experiment dimension instead of a
+hard-coded part of the environment wrapper.
+
+Smoke checks:
+
+```bash
+uv run python src/minigrid_train.py --env-id MiniGrid-FourRooms-v0 --seed 7 --output-dir outputs/encoder_compact_smoke --generations 3 --population 4 --episodes-per-agent 1 --eval-episodes 3 --eval-every 3 --state-encoder compact --methods cyclic_novelty
+
+uv run python src/minigrid_train.py --env-id MiniGrid-FourRooms-v0 --seed 7 --output-dir outputs/encoder_geometry_smoke --generations 3 --population 4 --episodes-per-agent 1 --eval-episodes 3 --eval-every 3 --state-encoder geometry --methods cyclic_novelty
+```
+
+Both completed successfully.
+
 ## Next Steps
 
 1. Extract a real `Method` class interface.

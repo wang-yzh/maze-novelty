@@ -20,6 +20,7 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=8)
     parser.add_argument("--eval-every", type=int, default=5)
     parser.add_argument("--max-steps", type=int, default=256)
+    parser.add_argument("--state-encoder", choices=["compact", "geometry"], default="compact")
     parser.add_argument("--method-time-limit-seconds", type=float, default=0.0)
     parser.add_argument(
         "--methods",
@@ -57,6 +58,8 @@ def main() -> None:
             str(args.eval_every),
             "--max-steps",
             str(args.max_steps),
+            "--state-encoder",
+            args.state_encoder,
             "--method-time-limit-seconds",
             str(args.method_time_limit_seconds),
             "--methods",

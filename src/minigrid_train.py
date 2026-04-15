@@ -48,6 +48,7 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=12)
     parser.add_argument("--max-steps", type=int, default=256)
     parser.add_argument("--eval-every", type=int, default=5)
+    parser.add_argument("--state-encoder", choices=["compact", "geometry"], default="compact")
     parser.add_argument("--methods", default="q_learning_strong,genetic_q_strong,cyclic_novelty,cyclic_operate_replay")
     parser.add_argument("--method-time-limit-seconds", type=float, default=0.0)
     args = parser.parse_args()
@@ -72,6 +73,8 @@ def main() -> None:
         args.method_budget = MethodBudget.from_seconds(args.method_time_limit_seconds).start()
         method_rows = methods[method](args, rng)
         method_rows, runtime_seconds = annotate_method_rows(method_rows, args.method_budget)
+        for row in method_rows:
+            row["state_encoder"] = args.state_encoder
         rows.extend(method_rows)
         print(f"{method} runtime_seconds={runtime_seconds:.2f}")
 
@@ -94,7 +97,7 @@ def run_q_learning_strong(args, rng):
 
 
 def _run_q_learning(args, rng, method: str, episode_multiplier: int):
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     agent = QAgent(probe.n_states, probe.n_actions, rng)
     probe.close()
@@ -125,7 +128,7 @@ def run_genetic_q_strong(args, rng):
 
 
 def _run_genetic_q(args, rng, method: str, episode_multiplier: int, eval_count: int):
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     population = [QAgent(probe.n_states, probe.n_actions, rng) for _ in range(args.population)]
     probe.close()
@@ -182,7 +185,7 @@ def run_map_elites_lite(args, rng):
 
 
 def _run_cyclic(args, rng, method: str, use_replay: bool):
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     population = [QAgent(probe.n_states, probe.n_actions, rng) for _ in range(args.population)]
     probe.close()
@@ -252,7 +255,7 @@ def _run_cyclic(args, rng, method: str, use_replay: bool):
 
 def _run_cyclic_operate_replay(args, rng):
     method = "cyclic_operate_replay"
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     population = [QAgent(probe.n_states, probe.n_actions, rng) for _ in range(args.population)]
     probe.close()
@@ -325,7 +328,7 @@ def _run_cyclic_operate_replay(args, rng):
 
 def _run_cyclic_three_phase(args, rng):
     method = "cyclic_three_phase"
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     population = [QAgent(probe.n_states, probe.n_actions, rng) for _ in range(args.population)]
     probe.close()
@@ -418,7 +421,7 @@ class GoExploreCell:
 
 def _run_go_explore_lite(args, rng):
     method = "go_explore_lite"
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     robust_agent = QAgent(probe.n_states, probe.n_actions, rng)
     probe.close()
@@ -473,7 +476,7 @@ class MapElite:
 
 def _run_map_elites_lite(args, rng):
     method = "map_elites_lite"
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
     n_states = probe.n_states
     n_actions = probe.n_actions
@@ -586,7 +589,7 @@ def _run_action_sequence(args, env, actions, generation, episode) -> Rollout:
 
 def _evaluate_minigrid(args, agent, rng, eval_episodes=None):
     eval_episodes = eval_episodes or args.eval_episodes
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     env = MiniGridTabularEnv(spec)
     rollouts = [
         _run_minigrid_episode(args, env, agent, rng, 0.0, False, 9000, idx)
@@ -610,7 +613,7 @@ def _evaluate_go_explore(args, robust_agent, cells):
     if policy_result.success_rate > 0.0:
         return policy_result
     best_cell = max(cells, key=lambda cell: (cell.success, cell.score, -cell.steps))
-    spec = MiniGridSpec(args.env_id, args.max_steps, args.seed)
+    spec = _spec(args)
     env = MiniGridTabularEnv(spec)
     rollouts = [_run_action_sequence(args, env, best_cell.actions, 9000, idx) for idx in range(args.eval_episodes)]
     env.close()
@@ -682,6 +685,10 @@ def _row(method, generation, result, archive, phase):
         "archive_unique_ratio": round(archive.unique_ratio(), 4),
         "success_path_diversity": round(archive.success_diversity(), 4),
     }
+
+
+def _spec(args) -> MiniGridSpec:
+    return MiniGridSpec(args.env_id, args.max_steps, args.seed, args.state_encoder)
 
 
 if __name__ == "__main__":
