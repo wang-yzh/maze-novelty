@@ -25,6 +25,7 @@ from ecology import (
     motif_selection_score,
     reinforce_action_trace,
     resource_selection_score,
+    rollout_mobility,
     rollout_progress,
     speciated_selection_score,
     stress_score,
@@ -54,6 +55,7 @@ METHOD_SEED_OFFSETS = {
     "cyclic_motif_oriented_radiation": 697,
     "cyclic_motif_fast_replay": 698,
     "cyclic_motif_fast_replay_v2": 706,
+    "cyclic_motif_bootstrap_replay": 707,
     "cyclic_resource_ecology_replay": 699,
     "go_explore_lite": 701,
     "map_elites_lite": 809,
@@ -94,6 +96,7 @@ def main() -> None:
         "cyclic_motif_oriented_radiation": run_cyclic_motif_oriented_radiation,
         "cyclic_motif_fast_replay": run_cyclic_motif_fast_replay,
         "cyclic_motif_fast_replay_v2": run_cyclic_motif_fast_replay_v2,
+        "cyclic_motif_bootstrap_replay": run_cyclic_motif_bootstrap_replay,
         "cyclic_resource_ecology_replay": run_cyclic_resource_ecology_replay,
         "go_explore_lite": run_go_explore_lite,
         "map_elites_lite": run_map_elites_lite,
@@ -259,6 +262,10 @@ def run_cyclic_motif_fast_replay(args, rng):
 
 def run_cyclic_motif_fast_replay_v2(args, rng):
     return _run_cyclic_motif_fast_replay_v2(args, rng)
+
+
+def run_cyclic_motif_bootstrap_replay(args, rng):
+    return _run_cyclic_motif_bootstrap_replay(args, rng)
 
 
 def run_cyclic_resource_ecology_replay(args, rng):
@@ -1102,6 +1109,159 @@ def _run_cyclic_motif_fast_replay_v2(args, rng):
     return rows
 
 
+def _run_cyclic_motif_bootstrap_replay(args, rng):
+    method = "cyclic_motif_bootstrap_replay"
+    spec = _spec(args)
+    probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
+    population = [QAgent(probe.n_states, probe.n_actions, rng) for _ in range(args.population)]
+    probe.close()
+    archive = NoveltyArchive(size=args.max_steps)
+    replay_bank = SuccessReplayBank(max_items=160)
+    niche_archive = NicheArchive(max_per_cell=2)
+    motif_bank = ScoredMotifBank(max_items=160)
+    hall_of_fame = [agent.clone() for agent in population[: max(2, args.population // 6)]]
+    rows = []
+    schedule = ("anchored_explore", "operate", "free_explore", "operate", "fast_replay")
+    phase_index = 0
+    phase_age = 0
+    phase_len = 4
+    bootstrap_patience = 8
+    fast_success_count = 0
+    bootstrap_motif_count = 0
+    total_success_count = 0
+    first_success_generation = -1
+    best_score_generation = -1
+    motif_bank_fill_generation = -1
+    best_seen_score = -1.0
+    env = MiniGridTabularEnv(spec)
+
+    for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
+        phase = schedule[phase_index]
+        bootstrap_enabled = fast_success_count == 0 and gen >= bootstrap_patience
+
+        if phase in {"anchored_explore", "free_explore"}:
+            anchored = phase == "anchored_explore"
+            scores = []
+            for idx, agent in enumerate(population):
+                if anchored and len(motif_bank):
+                    motif_bank.reinforce(agent, rng, passes=3, reward=0.06)
+                rollout_scores = []
+                for episode in range(args.episodes_per_agent):
+                    rollout = _run_minigrid_episode(
+                        args,
+                        env,
+                        agent,
+                        rng,
+                        epsilon=0.30 if anchored and not bootstrap_enabled else 0.46,
+                        train=True,
+                        generation=gen,
+                        episode=idx * 100 + episode,
+                        novelty_archive=archive,
+                        novelty_weight=0.020 if anchored else 0.045,
+                    )
+                    archive.add(rollout.positions, rollout.success)
+                    novelty = archive.trajectory_novelty(rollout.positions)
+                    added_fast, added_bootstrap = _add_bootstrap_memory(
+                        args,
+                        replay_bank,
+                        motif_bank,
+                        rollout,
+                        novelty,
+                        bootstrap_enabled,
+                    )
+                    fast_success_count += int(added_fast)
+                    bootstrap_motif_count += int(added_bootstrap)
+                    total_success_count += int(rollout.success)
+                    if motif_bank_fill_generation < 0 and len(motif_bank) > 0:
+                        motif_bank_fill_generation = gen
+                    niche_archive.add(agent, rollout, _bootstrap_rollout_score(rollout, archive, len(motif_bank), args.max_steps, anchored), args.max_steps)
+                    rollout_scores.append(_bootstrap_rollout_score(rollout, archive, len(motif_bank), args.max_steps, anchored))
+                scores.append(float(np.mean(rollout_scores)))
+            population = evolve_population(
+                population,
+                scores,
+                rng,
+                mutation_scale=0.055 if anchored and not bootstrap_enabled else 0.11,
+                mutation_rate=0.065 if anchored and not bootstrap_enabled else 0.11,
+            )
+            population[: len(hall_of_fame)] = [agent.clone() for agent in hall_of_fame]
+
+        elif phase == "operate":
+            epsilon = max(0.04, 0.18 * (1.0 - gen / args.generations))
+            for idx, agent in enumerate(population):
+                for episode in range(args.episodes_per_agent + 5):
+                    rollout = _run_minigrid_episode(args, env, agent, rng, epsilon, True, gen, idx * 100 + episode)
+                    archive.add(rollout.positions, rollout.success)
+                    novelty = archive.trajectory_novelty(rollout.positions)
+                    added_fast, added_bootstrap = _add_bootstrap_memory(
+                        args,
+                        replay_bank,
+                        motif_bank,
+                        rollout,
+                        novelty,
+                        bootstrap_enabled,
+                    )
+                    fast_success_count += int(added_fast)
+                    bootstrap_motif_count += int(added_bootstrap)
+                    total_success_count += int(rollout.success)
+                    if motif_bank_fill_generation < 0 and len(motif_bank) > 0:
+                        motif_bank_fill_generation = gen
+            results = [_evaluate_minigrid(args, agent, rng, eval_episodes=6) for agent in population]
+            scores = []
+            for agent, result in zip(population, results, strict=True):
+                novelty = archive.trajectory_novelty(result.best_rollout.positions)
+                niche_archive.add(agent, result.best_rollout, result.score, args.max_steps)
+                scores.append(_fast_result_score(result, len(motif_bank), novelty, args.max_steps))
+            hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
+            population = evolve_population(population, scores, rng, mutation_scale=0.02, mutation_rate=0.035)
+            population[: len(hall_of_fame)] = [agent.clone() for agent in hall_of_fame]
+
+        else:
+            for agent in population:
+                replay_bank.reinforce(agent, rng, passes=6, reward=0.12)
+                motif_bank.reinforce(agent, rng, passes=4, reward=0.055 if bootstrap_enabled else 0.08)
+            results = [_evaluate_minigrid(args, agent, rng, eval_episodes=8) for agent in population]
+            scores = [_fast_result_score(result, len(motif_bank), 0.0, args.max_steps) + 0.04 * result.success_rate for result in results]
+            hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
+            population = evolve_population(population, scores, rng, elite_frac=0.35, mutation_scale=0.018, mutation_rate=0.03)
+            population[: len(hall_of_fame)] = [agent.clone() for agent in hall_of_fame]
+
+        phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
+
+        if gen % args.eval_every == 0 or gen == args.generations:
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            if best.success_rate > 0.0 and first_success_generation < 0:
+                first_success_generation = gen
+            if best.score > best_seen_score:
+                best_seen_score = best.score
+                best_score_generation = gen
+            candidate = motif_bank.kind_count("candidate")
+            rows.append(
+                _row(
+                    method,
+                    gen,
+                    best,
+                    archive,
+                    schedule[phase_index],
+                    active_niches=len(niche_archive),
+                    replay_bank_size=len(replay_bank),
+                    motif_count=len(motif_bank),
+                    fast_success_count=fast_success_count,
+                    fast_replay_ratio=fast_success_count / max(1, total_success_count),
+                    first_success_generation=first_success_generation,
+                    best_score_generation=best_score_generation,
+                    candidate_motif_count=candidate,
+                    candidate_motif_ratio=candidate / max(1, len(motif_bank)),
+                    motif_bank_fill_generation=motif_bank_fill_generation,
+                    bootstrap_motif_count=bootstrap_motif_count,
+                )
+            )
+    env.close()
+    return rows
+
+
 def _run_cyclic_resource_ecology_replay(args, rng):
     method = "cyclic_resource_ecology_replay"
     spec = _spec(args)
@@ -1598,6 +1758,54 @@ def _motif_v2_rollout_score(rollout: Rollout, archive: NoveltyArchive, motif_cou
     return 0.44 * novelty + 0.22 * coverage + 0.17 * progress + 0.10 * proxy.success_rate + 0.07 * speed
 
 
+def _add_bootstrap_memory(
+    args,
+    replay_bank: SuccessReplayBank,
+    motif_bank: ScoredMotifBank,
+    rollout: Rollout,
+    novelty: float,
+    bootstrap_enabled: bool,
+) -> tuple[bool, bool]:
+    if rollout.success and rollout.steps <= _fast_success_threshold(args.max_steps):
+        replay_bank.add(rollout)
+        motif_bank.add_rollout(rollout, args.max_steps, novelty)
+        return True, False
+    if bootstrap_enabled and _strict_subgoal_motif(rollout, args.max_steps):
+        kind = motif_bank.add_rollout(rollout, args.max_steps, novelty)
+        return False, bool(kind and kind.startswith("candidate"))
+    return False, False
+
+
+def _strict_subgoal_motif(rollout: Rollout, max_steps: int) -> bool:
+    if rollout.success:
+        return False
+    return (
+        rollout_progress(rollout, max_steps) >= 0.35
+        and rollout_mobility(rollout) >= 0.60
+        and _revisit_ratio(rollout.positions) <= 0.40
+        and _region_transition_count(rollout.positions) >= 1
+    )
+
+
+def _bootstrap_rollout_score(
+    rollout: Rollout,
+    archive: NoveltyArchive,
+    motif_count: int,
+    max_steps: int,
+    anchored: bool,
+) -> float:
+    novelty = archive.trajectory_novelty(rollout.positions)
+    proxy = _rollout_eval_proxy(rollout, max_steps)
+    speed = 1.0 - min(proxy.avg_steps, max_steps) / max_steps
+    progress = rollout_progress(rollout, max_steps)
+    subgoal = float(_strict_subgoal_motif(rollout, max_steps))
+    motif_reuse = min(1.0, motif_count / 32.0)
+    if anchored:
+        return 0.30 * proxy.success_rate + 0.28 * speed + 0.18 * progress + 0.14 * motif_reuse + 0.10 * subgoal
+    coverage = len(set(rollout.positions)) / max_steps
+    return 0.40 * novelty + 0.22 * coverage + 0.18 * progress + 0.12 * subgoal + 0.08 * speed
+
+
 def _evaluate_minigrid_stress(args, agent, rng, generation: int, eval_episodes: int = 4):
     stress_steps = max(24, int(args.max_steps * 0.65))
     spec = MiniGridSpec(args.env_id, stress_steps, args.seed + 5000 + generation, args.state_encoder)
@@ -1663,6 +1871,19 @@ def _sample_go_explore_cell(cells, rng):
 def _trajectory_quality(rollout: Rollout, max_steps: int) -> float:
     speed = 1.0 - min(rollout.steps, max_steps) / max_steps
     return (1.0 if rollout.success else 0.0) + 0.20 * speed + rollout.total_reward
+
+
+def _revisit_ratio(positions: list[tuple[int, int]]) -> float:
+    if not positions:
+        return 1.0
+    return 1.0 - len(set(positions)) / len(positions)
+
+
+def _region_transition_count(positions: list[tuple[int, int]], cell_size: int = 4) -> int:
+    if len(positions) < 2:
+        return 0
+    regions = [(row // cell_size, col // cell_size) for row, col in positions]
+    return sum(regions[idx + 1] != regions[idx] for idx in range(len(regions) - 1))
 
 
 def _stress_score(result: EvalResult, max_steps: int) -> float:
@@ -1733,6 +1954,7 @@ def _row(
     candidate_motif_ratio: float = 0.0,
     motif_bank_fill_generation: int = -1,
     replay_improvement_delta: float = 0.0,
+    bootstrap_motif_count: int = 0,
 ):
     return {
         "method": method,
@@ -1759,6 +1981,7 @@ def _row(
         "candidate_motif_ratio": round(candidate_motif_ratio, 4),
         "motif_bank_fill_generation": motif_bank_fill_generation,
         "replay_improvement_delta": round(replay_improvement_delta, 4),
+        "bootstrap_motif_count": bootstrap_motif_count,
     }
 
 

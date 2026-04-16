@@ -28,6 +28,7 @@ METRICS = [
     "candidate_motif_ratio",
     "motif_bank_fill_generation",
     "replay_improvement_delta",
+    "bootstrap_motif_count",
     "runtime_seconds",
     "time_limited",
 ]
