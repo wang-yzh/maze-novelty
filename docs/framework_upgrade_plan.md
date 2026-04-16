@@ -350,3 +350,70 @@ Interpretation:
   score over the baseline.
 - The result supports keeping `operate-replay` as the engineering baseline while
   treating motif-guided radiation as the strongest new branch.
+
+## V0.8 Speed-Disciplined Motif Replay
+
+The v0.8 branch tests whether motif-guided radiation can inherit the speed
+discipline of `cyclic_operate_replay`.
+
+New method:
+
+```text
+cyclic_motif_fast_replay
+```
+
+Core changes relative to `cyclic_motif_oriented_radiation`:
+
+- same high-level cycle:
+  `anchored_explore -> operate -> free_explore -> operate -> fast_replay`.
+- only short successful rollouts enter the fast replay and motif banks.
+- operate and replay selection use higher speed pressure.
+- new diagnostic metrics:
+  `fast_success_count`, `fast_replay_ratio`,
+  `first_success_generation`, and `best_score_generation`.
+
+Benchmark setup:
+
+```text
+MiniGrid-FourRooms-v0
+state_encoder = geometry
+seeds = 7, 17, 27
+generations = 100
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+eval_every = 5
+method_time_limit_seconds = 100
+methods = cyclic_operate_replay,
+          cyclic_motif_oriented_radiation,
+          cyclic_motif_fast_replay,
+          cyclic_speciated_stress_replay
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Fast Replay Ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `cyclic_motif_fast_replay` | `0.3333 +/- 0.0000` | `18.1667 +/- 7.0985` | `0.4621 +/- 0.0083` | `0.2466 +/- 0.0259` |
+| `cyclic_speciated_stress_replay` | `0.2778 +/- 0.0785` | `18.5000 +/- 14.4280` | `0.4311 +/- 0.0345` | `0.0000 +/- 0.0000` |
+| `cyclic_motif_oriented_radiation` | `0.2778 +/- 0.0785` | `22.1667 +/- 8.0243` | `0.4268 +/- 0.0340` | `0.0000 +/- 0.0000` |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `24.5000 +/- 12.0899` | `0.4241 +/- 0.0310` | `0.0000 +/- 0.0000` |
+
+Per-run best:
+
+```text
+seed 7:  cyclic_motif_fast_replay
+seed 17: cyclic_motif_fast_replay
+seed 27: cyclic_motif_fast_replay
+```
+
+Interpretation:
+
+- `cyclic_motif_fast_replay` won all three seeds under the shorter 100-second
+  budget.
+- It kept the flat `3/3` success profile from motif-guided radiation while
+  improving speed.
+- The result supports the v0.8 hypothesis: the useful direction is not adding
+  more phases, but adding speed discipline to motif-guided exploration.
+- `cyclic_operate_replay` remains an important baseline, but under this budget it
+  lost both average score and average path length to `cyclic_motif_fast_replay`.

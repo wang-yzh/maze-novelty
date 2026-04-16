@@ -810,6 +810,43 @@ Interpretation:
 - The next serious direction is motif-guided radiation plus stricter speed
   pressure, not the full ecological loop.
 
+## Speed-Disciplined Motif Replay
+
+The next test reduced the per-method budget from 180 seconds to 100 seconds and
+added:
+
+```text
+cyclic_motif_fast_replay
+```
+
+This method keeps the motif-guided cycle but allows only short successful
+rollouts into the fast replay and motif banks.
+
+Results over seeds `7, 17, 27`:
+
+| Method | Test Success | Avg Steps | Test Score |
+| --- | ---: | ---: | ---: |
+| `cyclic_motif_fast_replay` | `0.3333 +/- 0.0000` | `18.1667 +/- 7.0985` | `0.4621 +/- 0.0083` |
+| `cyclic_speciated_stress_replay` | `0.2778 +/- 0.0785` | `18.5000 +/- 14.4280` | `0.4311 +/- 0.0345` |
+| `cyclic_motif_oriented_radiation` | `0.2778 +/- 0.0785` | `22.1667 +/- 8.0243` | `0.4268 +/- 0.0340` |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `24.5000 +/- 12.0899` | `0.4241 +/- 0.0310` |
+
+Per-run winners:
+
+```text
+seed 7:  cyclic_motif_fast_replay
+seed 17: cyclic_motif_fast_replay
+seed 27: cyclic_motif_fast_replay
+```
+
+Interpretation:
+
+- `cyclic_motif_fast_replay` won every seed in this 100-second benchmark.
+- It preserved the success-rate advantage of motif-guided radiation while
+  improving path speed.
+- This is the strongest current evidence that speed-disciplined motif replay
+  should become the next main branch.
+
 ## Reproduction Commands
 
 Setup:
