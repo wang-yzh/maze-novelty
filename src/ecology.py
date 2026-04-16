@@ -103,6 +103,107 @@ class MotifBank:
 
 
 @dataclass
+class ScoredMotif:
+    states: tuple[int, ...]
+    actions: tuple[int, ...]
+    score: float
+    kind: str
+
+
+class ScoredMotifBank:
+    def __init__(self, max_items: int = 160):
+        self.max_items = max_items
+        self.items: list[ScoredMotif] = []
+        self.confirmed_count = 0
+        self.candidate_count = 0
+
+    def add_rollout(self, rollout: Rollout, max_steps: int, novelty: float = 0.0, window: int = 8) -> str | None:
+        kind = motif_kind(rollout, max_steps)
+        if kind is None or len(rollout.actions) < 2:
+            return None
+
+        base_score = motif_quality(rollout, max_steps, novelty, kind)
+        spans = _motif_spans(rollout, window)
+        for start, end in spans:
+            states = tuple(rollout.states[start : end + 1])
+            actions = tuple(rollout.actions[start:end])
+            if actions:
+                mobility = _segment_mobility(rollout.positions[start : end + 1])
+                self.items.append(ScoredMotif(states, actions, base_score + 0.08 * mobility, kind))
+        self.items.sort(key=lambda item: item.score, reverse=True)
+        del self.items[self.max_items :]
+        if kind.startswith("confirmed"):
+            self.confirmed_count += 1
+        else:
+            self.candidate_count += 1
+        return kind
+
+    def reinforce(self, agent: QAgent, rng: np.random.Generator, passes: int = 3, reward: float = 0.08) -> None:
+        if not self.items:
+            return
+        weights = np.array([max(0.01, item.score) for item in self.items], dtype=np.float64)
+        weights = weights / weights.sum()
+        for _ in range(passes):
+            item = self.items[int(rng.choice(len(self.items), p=weights))]
+            kind_reward = reward if item.kind.startswith("confirmed") else reward * 0.45
+            reinforce_action_trace(agent, item.states, item.actions, kind_reward)
+
+    def kind_count(self, prefix: str) -> int:
+        return sum(item.kind.startswith(prefix) for item in self.items)
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+
+def motif_kind(rollout: Rollout, max_steps: int) -> str | None:
+    if rollout.success:
+        if rollout.steps <= fast_success_threshold(max_steps):
+            return "confirmed_fast"
+        if rollout.steps <= medium_success_threshold(max_steps):
+            return "confirmed_medium"
+        return None
+    progress = rollout_progress(rollout, max_steps)
+    mobility = rollout_mobility(rollout)
+    if progress >= 0.28:
+        return "candidate_progress"
+    if mobility >= 0.55:
+        return "candidate_mobility"
+    return None
+
+
+def motif_quality(rollout: Rollout, max_steps: int, novelty: float, kind: str) -> float:
+    parent_success = 1.0 if rollout.success else 0.35
+    parent_speed = 1.0 - min(rollout.steps, max_steps) / max_steps
+    mobility = rollout_mobility(rollout)
+    kind_bonus = 0.20 if kind == "confirmed_fast" else 0.08 if kind == "confirmed_medium" else 0.0
+    return 0.35 * parent_success + 0.25 * parent_speed + 0.20 * mobility + 0.10 * novelty + kind_bonus
+
+
+def fast_success_threshold(max_steps: int) -> int:
+    return max(16, int(max_steps * 0.12))
+
+
+def medium_success_threshold(max_steps: int) -> int:
+    return max(fast_success_threshold(max_steps) + 1, int(max_steps * 0.25))
+
+
+def rollout_progress(rollout: Rollout, max_steps: int) -> float:
+    if len(rollout.positions) < 2:
+        return 0.0
+    start = rollout.positions[0]
+    end = rollout.positions[-1]
+    net = abs(end[0] - start[0]) + abs(end[1] - start[1])
+    return min(1.0, net / max(1, int(max_steps**0.5) * 2))
+
+
+def rollout_mobility(rollout: Rollout) -> float:
+    if len(rollout.positions) < 2:
+        return 0.0
+    moved = sum(rollout.positions[idx + 1] != rollout.positions[idx] for idx in range(len(rollout.positions) - 1))
+    return moved / max(1, len(rollout.positions) - 1)
+
+
+@dataclass
 class StressGateResult:
     survivors: list[QAgent]
     scores: list[float]
@@ -177,6 +278,23 @@ def most_mobile_window(positions: list[tuple[int, int]], window: int) -> int:
             best_distance = distance
             best_start = start
     return best_start
+
+
+def _motif_spans(rollout: Rollout, window: int) -> list[tuple[int, int]]:
+    spans = []
+    end_start = max(0, len(rollout.actions) - window)
+    spans.append((end_start, len(rollout.actions)))
+    if len(rollout.actions) > window:
+        best_start = most_mobile_window(rollout.positions, window)
+        spans.append((best_start, best_start + window))
+    return spans
+
+
+def _segment_mobility(positions: list[tuple[int, int]]) -> float:
+    if len(positions) < 2:
+        return 0.0
+    moved = sum(positions[idx + 1] != positions[idx] for idx in range(len(positions) - 1))
+    return moved / max(1, len(positions) - 1)
 
 
 def reinforce_action_trace(agent: QAgent, states: list[int] | tuple[int, ...], actions: list[int] | tuple[int, ...], reward: float) -> None:
