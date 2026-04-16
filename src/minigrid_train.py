@@ -32,6 +32,7 @@ from ecology import (
 )
 from evolution import EvalResult, evolve_population, exploitation_score
 from minigrid_adapter import MiniGridSpec, MiniGridTabularEnv
+from minigrid_diagnostics import MiniGridEvalDiagnostics, summarize_rollouts
 from novelty import NoveltyArchive
 from replay import SuccessReplayBank
 from visualize import write_metrics_csv
@@ -1701,7 +1702,11 @@ def _evaluate_minigrid(args, agent, rng, eval_episodes=None):
     stability = 0.0
     score = 0.55 * success_rate + 0.30 * speed + 0.15 * stability
     best_rollout = min(rollouts, key=lambda rollout: (not rollout.success, rollout.steps))
-    return EvalResult(success_rate, avg_steps, stability, score, best_rollout)
+    return _with_minigrid_diagnostics(
+        EvalResult(success_rate, avg_steps, stability, score, best_rollout),
+        rollouts,
+        args.max_steps,
+    )
 
 
 def _rollout_eval_proxy(rollout: Rollout, max_steps: int) -> EvalResult:
@@ -1710,6 +1715,15 @@ def _rollout_eval_proxy(rollout: Rollout, max_steps: int) -> EvalResult:
     speed = 1.0 - min(avg_steps, max_steps) / max_steps
     score = 0.55 * success_rate + 0.30 * speed
     return EvalResult(success_rate, avg_steps, 0.0, score, rollout)
+
+
+def _with_minigrid_diagnostics(result: EvalResult, rollouts: list[Rollout], max_steps: int) -> EvalResult:
+    result.diagnostics = summarize_rollouts(rollouts, max_steps)  # type: ignore[attr-defined]
+    return result
+
+
+def _empty_minigrid_diagnostics() -> MiniGridEvalDiagnostics:
+    return MiniGridEvalDiagnostics(0.0, 0.0, 0.0, 0, 0.0, 0, 1.0, 0.0, 0)
 
 
 def _fast_success_threshold(max_steps: int) -> int:
@@ -1821,7 +1835,11 @@ def _evaluate_minigrid_stress(args, agent, rng, generation: int, eval_episodes: 
     speed = 1.0 - min(avg_steps, stress_steps) / stress_steps
     score = 0.55 * success_rate + 0.30 * speed
     best_rollout = min(rollouts, key=lambda rollout: (not rollout.success, rollout.steps))
-    return EvalResult(success_rate, avg_steps, 0.0, score, best_rollout)
+    return _with_minigrid_diagnostics(
+        EvalResult(success_rate, avg_steps, 0.0, score, best_rollout),
+        rollouts,
+        stress_steps,
+    )
 
 
 def _evaluate_go_explore(args, robust_agent, cells):
@@ -1841,7 +1859,11 @@ def _evaluate_go_explore(args, robust_agent, cells):
     speed = 1.0 - min(avg_steps, args.max_steps) / args.max_steps
     score = 0.55 * success_rate + 0.30 * speed
     best_rollout = min(rollouts, key=lambda rollout: (not rollout.success, rollout.steps))
-    return EvalResult(success_rate, avg_steps, 0.0, score, best_rollout)
+    return _with_minigrid_diagnostics(
+        EvalResult(success_rate, avg_steps, 0.0, score, best_rollout),
+        rollouts,
+        args.max_steps,
+    )
 
 
 def _hidden_score(args, agent, archive, rng):
@@ -1956,6 +1978,7 @@ def _row(
     replay_improvement_delta: float = 0.0,
     bootstrap_motif_count: int = 0,
 ):
+    diagnostics = getattr(result, "diagnostics", _empty_minigrid_diagnostics())
     return {
         "method": method,
         "generation": generation,
@@ -1964,6 +1987,15 @@ def _row(
         "test_avg_steps": round(result.avg_steps, 4),
         "test_stability": round(result.stability, 4),
         "test_score": round(result.score, 4),
+        "subgoal_score": round(diagnostics.avg_subgoal_score, 4),
+        "best_subgoal_score": round(diagnostics.best_subgoal_score, 4),
+        "region_transition_count": round(diagnostics.avg_region_transitions, 4),
+        "best_region_transition_count": diagnostics.best_region_transitions,
+        "new_region_count": round(diagnostics.avg_new_regions, 4),
+        "best_new_region_count": diagnostics.best_new_regions,
+        "revisit_ratio": round(diagnostics.avg_revisit_ratio, 4),
+        "mobility": round(diagnostics.avg_mobility, 4),
+        "max_distance_from_start": diagnostics.best_max_distance_from_start,
         "archive_coverage": round(archive.coverage(), 4),
         "archive_unique_ratio": round(archive.unique_ratio(), 4),
         "success_path_diversity": round(archive.success_diversity(), 4),
