@@ -888,6 +888,49 @@ Interpretation:
 - The clean v0.8 rule, short successful rollouts only, remains the best current
   memory policy.
 
+## Task Suite Transition
+
+The project moved from a single FourRooms benchmark to a first task ladder:
+
+```text
+MiniGrid-FourRooms-v0
+MiniGrid-MultiRoom-N4-S5-v0
+MiniGrid-Dynamic-Obstacles-8x8-v0
+```
+
+Single-seed setup:
+
+```text
+seed = 7
+state_encoder = geometry
+method_time_limit_seconds = 100
+methods = cyclic_operate_replay,
+          cyclic_motif_fast_replay,
+          cyclic_ecology,
+          cyclic_motif_bootstrap_replay
+```
+
+Results:
+
+| Task | Best Method | Test Success | Avg Steps | Test Score |
+| --- | --- | ---: | ---: | ---: |
+| `MiniGrid-FourRooms-v0` | `cyclic_motif_bootstrap_replay` | `0.3333` | `7.5000` | `0.4745` |
+| `MiniGrid-MultiRoom-N4-S5-v0` | none | `0.0000` | `256.0000` | `0.0000` |
+| `MiniGrid-Dynamic-Obstacles-8x8-v0` | `cyclic_motif_bootstrap_replay` | `1.0000` | `19.6667` | `0.8270` |
+
+Interpretation:
+
+- FourRooms remains a useful regression task but is no longer enough to guide
+  algorithm design.
+- MultiRoom exposed a hard failure: all methods scored zero and motif banks did
+  not fill. This points toward state representation, subgoal detection, or task
+  interface issues rather than simple cycle tuning.
+- Dynamic-Obstacles-8x8 is solvable by all tested methods; it may need a harder
+  size or seed sweep to serve as a robustness benchmark.
+- `cyclic_motif_bootstrap_replay` is viable, but its bootstrap pathway did not
+  activate in the successful tasks. Its cold-start value still needs a task where
+  strict subgoal motifs appear before full fast success.
+
 ## Reproduction Commands
 
 Setup:

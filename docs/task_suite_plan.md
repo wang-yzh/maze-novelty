@@ -112,3 +112,45 @@ success rate drops relative to cyclic_motif_fast_replay
 `cyclic_motif_fast_replay` is an exploitation champion when fast successes are
 available. `cyclic_ecology` and `cyclic_motif_bootstrap_replay` may become more
 valuable when complete success is sparse and the task requires staged discovery.
+
+## First Single-Seed Result
+
+Setup:
+
+```text
+seed = 7
+state_encoder = geometry
+method_time_limit_seconds = 100
+methods = cyclic_operate_replay,
+          cyclic_motif_fast_replay,
+          cyclic_ecology,
+          cyclic_motif_bootstrap_replay
+```
+
+Results:
+
+| Task | Best Method | Test Success | Avg Steps | Test Score | Notes |
+| --- | --- | ---: | ---: | ---: | --- |
+| `MiniGrid-FourRooms-v0` | `cyclic_motif_bootstrap_replay` | `0.3333` | `7.5000` | `0.4745` | Bootstrap did not need candidate motifs; fast successes were available. |
+| `MiniGrid-MultiRoom-N4-S5-v0` | none | `0.0000` | `256.0000` | `0.0000` | All methods failed; likely state/task interface bottleneck. |
+| `MiniGrid-Dynamic-Obstacles-8x8-v0` | `cyclic_motif_bootstrap_replay` | `1.0000` | `19.6667` | `0.8270` | All methods solved; bootstrap and motif-fast were competitive. |
+
+Interpretation:
+
+- FourRooms is still useful as a regression check but no longer enough as a main
+  optimization target.
+- MultiRoom is the first truly diagnostic next task: all methods failed and
+  motif banks stayed empty.
+- Dynamic-Obstacles is solvable under the current navigation-only action set and
+  can test speed/robustness, but it may be too easy at `8x8`.
+- `cyclic_motif_bootstrap_replay` is viable, but in the successful tasks it won
+  without needing bootstrap candidate motifs. Its cold-start value remains
+  unproven.
+
+Next useful task-suite changes:
+
+```text
+1. Add better progress/subgoal diagnostics for MultiRoom.
+2. Consider a larger or harder Dynamic-Obstacles task.
+3. Add an explicit action-set upgrade before DoorKey.
+```
