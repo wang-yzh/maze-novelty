@@ -847,6 +847,47 @@ Interpretation:
 - This is the strongest current evidence that speed-disciplined motif replay
   should become the next main branch.
 
+## Motif Memory Quality Test
+
+The next version tested whether a richer motif memory system improves the
+current champion.
+
+New method:
+
+```text
+cyclic_motif_fast_replay_v2
+```
+
+It adds scored motifs, medium-success motifs, candidate motifs from high-progress
+failures, separate anchored/free scoring, and replay diagnostics.
+
+Results over seeds `7, 17, 27` with the same 100-second budget:
+
+| Method | Test Success | Avg Steps | Test Score |
+| --- | ---: | ---: | ---: |
+| `cyclic_motif_fast_replay` | `0.3333 +/- 0.0000` | `17.8333 +/- 7.4199` | `0.4624 +/- 0.0087` |
+| `cyclic_motif_fast_replay_v2` | `0.2778 +/- 0.0785` | `20.3333 +/- 15.7551` | `0.4289 +/- 0.0333` |
+| `cyclic_motif_oriented_radiation` | `0.2778 +/- 0.0785` | `22.1667 +/- 8.0243` | `0.4268 +/- 0.0340` |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `24.5000 +/- 12.0899` | `0.4241 +/- 0.0310` |
+
+Per-run winners:
+
+```text
+seed 7:  cyclic_motif_fast_replay
+seed 17: cyclic_motif_fast_replay
+seed 27: cyclic_motif_fast_replay
+```
+
+Interpretation:
+
+- v2 did not improve the current champion.
+- The richer motif bank filled, but replay improvement delta was negative on
+  average.
+- This suggests that medium/candidate motif replay is currently too noisy or too
+  strong.
+- The clean v0.8 rule, short successful rollouts only, remains the best current
+  memory policy.
+
 ## Reproduction Commands
 
 Setup:

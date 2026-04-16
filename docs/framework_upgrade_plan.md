@@ -417,3 +417,73 @@ Interpretation:
   more phases, but adding speed discipline to motif-guided exploration.
 - `cyclic_operate_replay` remains an important baseline, but under this budget it
   lost both average score and average path length to `cyclic_motif_fast_replay`.
+
+## V0.9 Motif Memory Quality
+
+The v0.9 branch tests whether `cyclic_motif_fast_replay` can be improved by
+raising memory quality rather than changing the phase cycle.
+
+New method:
+
+```text
+cyclic_motif_fast_replay_v2
+```
+
+Core changes:
+
+- `ScoredMotifBank`: motifs are ranked by parent success, parent speed, segment
+  mobility, novelty, and motif type.
+- success is split into fast and medium tiers.
+- high-progress and high-mobility failures can produce candidate motifs.
+- anchored and free exploration use separate scoring functions.
+- operate training adds small revisit and turn penalties.
+- diagnostics include confirmed/candidate motif counts, motif fill generation,
+  and replay improvement delta.
+
+Benchmark setup:
+
+```text
+MiniGrid-FourRooms-v0
+state_encoder = geometry
+seeds = 7, 17, 27
+generations = 100
+population = 8
+episodes_per_agent = 2
+eval_episodes = 6
+eval_every = 5
+method_time_limit_seconds = 100
+methods = cyclic_operate_replay,
+          cyclic_motif_oriented_radiation,
+          cyclic_motif_fast_replay,
+          cyclic_motif_fast_replay_v2
+```
+
+Results:
+
+| Method | Test Success | Avg Steps | Test Score | Fast Replay Ratio | Replay Improvement Delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `cyclic_motif_fast_replay` | `0.3333 +/- 0.0000` | `17.8333 +/- 7.4199` | `0.4624 +/- 0.0087` | `0.2448 +/- 0.0255` | `0.0000 +/- 0.0000` |
+| `cyclic_motif_fast_replay_v2` | `0.2778 +/- 0.0785` | `20.3333 +/- 15.7551` | `0.4289 +/- 0.0333` | `0.3001 +/- 0.0389` | `-0.1282 +/- 0.0453` |
+| `cyclic_motif_oriented_radiation` | `0.2778 +/- 0.0785` | `22.1667 +/- 8.0243` | `0.4268 +/- 0.0340` | `0.0000 +/- 0.0000` | `0.0000 +/- 0.0000` |
+| `cyclic_operate_replay` | `0.2778 +/- 0.0785` | `24.5000 +/- 12.0899` | `0.4241 +/- 0.0310` | `0.0000 +/- 0.0000` | `0.0000 +/- 0.0000` |
+
+Per-run best:
+
+```text
+seed 7:  cyclic_motif_fast_replay
+seed 17: cyclic_motif_fast_replay
+seed 27: cyclic_motif_fast_replay
+```
+
+Interpretation:
+
+- `cyclic_motif_fast_replay_v2` did not beat the v0.8 champion.
+- The v2 motif bank filled immediately and saturated at 180 motifs, but that did
+  not translate into better final policy quality.
+- The negative replay improvement delta suggests the scored/candidate motif
+  replay is currently too noisy or too strong.
+- The added medium-success and candidate-motif channels likely diluted the clean
+  short-success signal that made v0.8 strong.
+- The next step should not be more memory complexity. It should either simplify
+  v2 back toward fast-only confirmed motifs or use v2 diagnostics to tune replay
+  strength before rerunning.
