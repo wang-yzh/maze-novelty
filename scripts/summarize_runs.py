@@ -18,6 +18,10 @@ METRICS = [
     "stress_pass_rate",
     "replay_bank_size",
     "motif_count",
+    "fast_success_count",
+    "fast_replay_ratio",
+    "first_success_generation",
+    "best_score_generation",
     "runtime_seconds",
     "time_limited",
 ]
@@ -66,6 +70,8 @@ def main() -> None:
             row.get("active_niches", "n/a"),
             "stress_pass_rate=",
             row.get("stress_pass_rate", "n/a"),
+            "fast_replay_ratio=",
+            row.get("fast_replay_ratio", "n/a"),
         )
 
     print("\nAverages")
