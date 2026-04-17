@@ -32,7 +32,7 @@ from ecology import (
 )
 from evolution import EvalResult, evolve_population, exploitation_score
 from minigrid_adapter import MiniGridSpec, MiniGridTabularEnv
-from minigrid_diagnostics import MiniGridEvalDiagnostics, summarize_rollouts
+from minigrid_diagnostics import MiniGridEvalDiagnostics, analyze_rollout, summarize_rollouts
 from novelty import NoveltyArchive
 from replay import SuccessReplayBank
 from visualize import write_metrics_csv
@@ -57,6 +57,7 @@ METHOD_SEED_OFFSETS = {
     "cyclic_motif_fast_replay": 698,
     "cyclic_motif_fast_replay_v2": 706,
     "cyclic_motif_bootstrap_replay": 707,
+    "cyclic_subgoal_ecology_replay": 711,
     "cyclic_resource_ecology_replay": 699,
     "go_explore_lite": 701,
     "map_elites_lite": 809,
@@ -98,6 +99,7 @@ def main() -> None:
         "cyclic_motif_fast_replay": run_cyclic_motif_fast_replay,
         "cyclic_motif_fast_replay_v2": run_cyclic_motif_fast_replay_v2,
         "cyclic_motif_bootstrap_replay": run_cyclic_motif_bootstrap_replay,
+        "cyclic_subgoal_ecology_replay": run_cyclic_subgoal_ecology_replay,
         "cyclic_resource_ecology_replay": run_cyclic_resource_ecology_replay,
         "go_explore_lite": run_go_explore_lite,
         "map_elites_lite": run_map_elites_lite,
@@ -199,7 +201,7 @@ def _run_genetic_q(args, rng, method: str, episode_multiplier: int, eval_count: 
             mutation_rate=0.05 if episode_multiplier > 1 else 0.07,
         )
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(_row(method, gen, best, archive, "exploit"))
     env.close()
     return rows
@@ -267,6 +269,10 @@ def run_cyclic_motif_fast_replay_v2(args, rng):
 
 def run_cyclic_motif_bootstrap_replay(args, rng):
     return _run_cyclic_motif_bootstrap_replay(args, rng)
+
+
+def run_cyclic_subgoal_ecology_replay(args, rng):
+    return _run_cyclic_subgoal_ecology_replay(args, rng)
 
 
 def run_cyclic_resource_ecology_replay(args, rng):
@@ -344,7 +350,7 @@ def _run_cyclic(args, rng, method: str, use_replay: bool):
                 phase_age = 0
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(_row(method, gen, best, archive, phase))
     env.close()
     return rows
@@ -417,7 +423,7 @@ def _run_cyclic_operate_replay(args, rng):
             phase_age = 0
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(_row(method, gen, best, archive, schedule[phase_index]))
     env.close()
     return rows
@@ -566,7 +572,7 @@ def _run_cyclic_ecology(
             phase_age = 0
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(_row(method, gen, best, archive, schedule[phase_index]))
 
     env.close()
@@ -689,7 +695,7 @@ def _run_cyclic_speciated_stress_replay(args, rng):
         phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(
                 _row(
                     method,
@@ -797,7 +803,7 @@ def _run_cyclic_motif_oriented_radiation(args, rng):
         phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(
                 _row(
                     method,
@@ -919,7 +925,7 @@ def _run_cyclic_motif_fast_replay(args, rng):
         phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             if best.success_rate > 0.0 and first_success_generation < 0:
                 first_success_generation = gen
             if best.score > best_seen_score:
@@ -1060,14 +1066,17 @@ def _run_cyclic_motif_fast_replay_v2(args, rng):
             population[: len(hall_of_fame)] = [agent.clone() for agent in hall_of_fame]
 
         else:
-            before = max((_evaluate_minigrid(args, agent, rng, eval_episodes=4) for agent in population + hall_of_fame), key=lambda r: r.score)
+            before = max(
+                (_evaluate_minigrid(args, agent, rng, eval_episodes=4) for agent in population + hall_of_fame),
+                key=lambda result: _result_rank(result, args.max_steps),
+            )
             score_before_replay = before.score
             for agent in population:
                 replay_bank.reinforce(agent, rng, passes=5, reward=0.11)
                 motif_bank.reinforce(agent, rng, passes=7, reward=0.09)
             results = [_evaluate_minigrid(args, agent, rng, eval_episodes=8) for agent in population]
             scores = [_motif_v2_result_score(result, len(motif_bank), 0.0, args.max_steps) + 0.04 * result.success_rate for result in results]
-            after = max(results, key=lambda result: result.score)
+            after = max(results, key=lambda result: _result_rank(result, args.max_steps))
             replay_improvement_delta = after.score - score_before_replay
             hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
             population = evolve_population(population, scores, rng, elite_frac=0.35, mutation_scale=0.016, mutation_rate=0.028)
@@ -1076,7 +1085,7 @@ def _run_cyclic_motif_fast_replay_v2(args, rng):
         phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             if best.success_rate > 0.0 and first_success_generation < 0:
                 first_success_generation = gen
             if best.score > best_seen_score:
@@ -1232,7 +1241,7 @@ def _run_cyclic_motif_bootstrap_replay(args, rng):
         phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             if best.success_rate > 0.0 and first_success_generation < 0:
                 first_success_generation = gen
             if best.score > best_seen_score:
@@ -1257,6 +1266,226 @@ def _run_cyclic_motif_bootstrap_replay(args, rng):
                     candidate_motif_ratio=candidate / max(1, len(motif_bank)),
                     motif_bank_fill_generation=motif_bank_fill_generation,
                     bootstrap_motif_count=bootstrap_motif_count,
+                )
+            )
+    env.close()
+    return rows
+
+
+def _run_cyclic_subgoal_ecology_replay(args, rng):
+    method = "cyclic_subgoal_ecology_replay"
+    spec = _spec(args)
+    probe = MiniGridTabularEnv(spec, episode_seed=args.seed)
+    population = [QAgent(probe.n_states, probe.n_actions, rng) for _ in range(args.population)]
+    n_states = probe.n_states
+    n_actions = probe.n_actions
+    probe.close()
+    archive = NoveltyArchive(size=args.max_steps)
+    replay_bank = SuccessReplayBank(max_items=180)
+    niche_archive = NicheArchive(max_per_cell=2)
+    motif_bank = ScoredMotifBank(max_items=200)
+    hall_of_fame = [agent.clone() for agent in population[: max(2, args.population // 6)]]
+    stress_survivors = [agent.clone() for agent in hall_of_fame]
+    rows = []
+    schedule = ("open_explore", "niche_sort", "operate", "stress_gate", "bottleneck", "subgoal_replay")
+    phase_index = 0
+    phase_age = 0
+    phase_len = 4
+    first_success_generation = -1
+    best_score_generation = -1
+    motif_bank_fill_generation = -1
+    best_seen_score = -1.0
+    stress_pass_rate = 0.0
+    confirmed_motif_count = 0
+    subgoal_motif_count = 0
+    transition_motif_count = 0
+    replay_improvement_delta = 0.0
+    env = MiniGridTabularEnv(spec)
+
+    for gen in range(args.generations + 1):
+        if _time_expired(args):
+            break
+        phase = schedule[phase_index]
+
+        if phase == "open_explore":
+            scores = []
+            for idx, agent in enumerate(population):
+                rollout_scores = []
+                for episode in range(args.episodes_per_agent):
+                    rollout = _run_minigrid_episode(
+                        args,
+                        env,
+                        agent,
+                        rng,
+                        epsilon=0.48,
+                        train=True,
+                        generation=gen,
+                        episode=idx * 100 + episode,
+                        novelty_archive=archive,
+                        novelty_weight=0.046,
+                    )
+                    archive.add(rollout.positions, rollout.success)
+                    novelty = archive.trajectory_novelty(rollout.positions)
+                    kind = _add_subgoal_memory(args, replay_bank, motif_bank, rollout, novelty)
+                    confirmed_motif_count += int(kind is not None and kind.startswith("confirmed"))
+                    subgoal_motif_count += int(kind is not None and kind.startswith("subgoal"))
+                    transition_motif_count += int(kind == "subgoal_transition")
+                    if motif_bank_fill_generation < 0 and len(motif_bank) > 0:
+                        motif_bank_fill_generation = gen
+                    score = _subgoal_rollout_score(rollout, archive, len(motif_bank), args.max_steps, phase)
+                    niche_archive.add(agent, rollout, score, args.max_steps)
+                    rollout_scores.append(score)
+                scores.append(float(np.mean(rollout_scores)))
+            population = evolve_population(population, scores, rng, mutation_scale=0.12, mutation_rate=0.12)
+            population[: len(hall_of_fame)] = [agent.clone() for agent in hall_of_fame]
+
+        elif phase == "niche_sort":
+            results = [_evaluate_minigrid(args, agent, rng, eval_episodes=4) for agent in population]
+            scores = []
+            for agent, result in zip(population, results, strict=True):
+                novelty = archive.trajectory_novelty(result.best_rollout.positions)
+                diagnostics = getattr(result, "diagnostics", _empty_minigrid_diagnostics())
+                score = (
+                    0.36 * result.score
+                    + 0.24 * diagnostics.avg_subgoal_score
+                    + 0.16 * min(1.0, diagnostics.avg_region_transitions / 8.0)
+                    + 0.14 * novelty
+                    + 0.10 * (1.0 - niche_archive.crowding_penalty(result.best_rollout, args.max_steps))
+                )
+                niche_archive.add(agent, result.best_rollout, score, args.max_steps)
+                scores.append(score)
+            local_survivors = niche_archive.local_survivors(per_cell=1, limit=max(2, args.population // 3))
+            population = evolve_population(population, scores, rng, elite_frac=0.30, mutation_scale=0.055, mutation_rate=0.07)
+            population[: len(local_survivors)] = local_survivors[: len(population)]
+
+        elif phase == "operate":
+            epsilon = max(0.04, 0.18 * (1.0 - gen / args.generations))
+            for idx, agent in enumerate(population):
+                if len(motif_bank) and rng.random() < 0.45:
+                    motif_bank.reinforce(agent, rng, passes=2, reward=0.065)
+                for episode in range(args.episodes_per_agent + 4):
+                    rollout = _run_minigrid_episode(
+                        args,
+                        env,
+                        agent,
+                        rng,
+                        epsilon,
+                        True,
+                        gen,
+                        idx * 100 + episode,
+                        revisit_penalty=0.010,
+                        turn_penalty=0.002,
+                    )
+                    archive.add(rollout.positions, rollout.success)
+                    novelty = archive.trajectory_novelty(rollout.positions)
+                    kind = _add_subgoal_memory(args, replay_bank, motif_bank, rollout, novelty)
+                    confirmed_motif_count += int(kind is not None and kind.startswith("confirmed"))
+                    subgoal_motif_count += int(kind is not None and kind.startswith("subgoal"))
+                    transition_motif_count += int(kind == "subgoal_transition")
+                    if motif_bank_fill_generation < 0 and len(motif_bank) > 0:
+                        motif_bank_fill_generation = gen
+            results = [_evaluate_minigrid(args, agent, rng, eval_episodes=6) for agent in population]
+            scores = []
+            for agent, result in zip(population, results, strict=True):
+                novelty = archive.trajectory_novelty(result.best_rollout.positions)
+                score = _subgoal_result_score(result, len(motif_bank), novelty, args.max_steps, phase)
+                niche_archive.add(agent, result.best_rollout, score, args.max_steps)
+                scores.append(score)
+            hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
+            population = evolve_population(population, scores, rng, mutation_scale=0.022, mutation_rate=0.035)
+            population[: len(hall_of_fame)] = [agent.clone() for agent in hall_of_fame]
+
+        elif phase == "stress_gate":
+            normal_results = [_evaluate_minigrid(args, agent, rng, eval_episodes=4) for agent in population]
+            stress_results = [_evaluate_minigrid_stress(args, agent, rng, gen, eval_episodes=4) for agent in population]
+            scores = []
+            passed = []
+            for agent, result, stress_result in zip(population, normal_results, stress_results, strict=True):
+                novelty = archive.trajectory_novelty(result.best_rollout.positions)
+                score = (
+                    0.42 * _subgoal_result_score(result, len(motif_bank), novelty, args.max_steps, phase)
+                    + 0.36 * stress_score(stress_result, args.max_steps)
+                    + 0.22 * _diagnostic_score(stress_result, args.max_steps)
+                )
+                scores.append(score)
+                if stress_result.success_rate > 0.0 or _diagnostic_score(stress_result, args.max_steps) >= 0.18:
+                    passed.append(agent.clone())
+                    kind = _add_subgoal_memory(args, replay_bank, motif_bank, stress_result.best_rollout, novelty)
+                    confirmed_motif_count += int(kind is not None and kind.startswith("confirmed"))
+                    subgoal_motif_count += int(kind is not None and kind.startswith("subgoal"))
+                    transition_motif_count += int(kind == "subgoal_transition")
+            stress_pass_rate = len(passed) / max(1, len(population))
+            if not passed:
+                passed = niche_archive.best(max(1, args.population // 8)) or [agent.clone() for agent in hall_of_fame[:1]]
+            stress_survivors = [agent.clone() for agent in passed[: max(2, args.population // 4)]]
+            hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
+            population = evolve_population(population, scores, rng, elite_frac=0.30, mutation_scale=0.032, mutation_rate=0.045)
+            population[: len(passed)] = passed[: len(population)]
+
+        elif phase == "bottleneck":
+            next_population = []
+            next_population.extend(stress_survivors[: max(1, args.population // 4)])
+            next_population.extend(niche_archive.local_survivors(per_cell=1, limit=max(2, args.population // 3)))
+            next_population.extend([agent.clone() for agent in hall_of_fame[: max(2, args.population // 5)]])
+            while len(next_population) < args.population:
+                if rng.random() < 0.65 and next_population:
+                    child = next_population[int(rng.integers(len(next_population)))].clone()
+                    child.mutate(scale=0.075, rate=0.08)
+                    next_population.append(child)
+                else:
+                    next_population.append(QAgent(n_states, n_actions, rng))
+            population = next_population[: args.population]
+            stress_survivors = population[: max(2, args.population // 4)]
+
+        else:
+            before = max(
+                (_evaluate_minigrid(args, agent, rng, eval_episodes=4) for agent in population + hall_of_fame),
+                key=lambda result: _result_rank(result, args.max_steps),
+            )
+            for agent in population:
+                replay_bank.reinforce(agent, rng, passes=5, reward=0.10)
+                motif_bank.reinforce(agent, rng, passes=6, reward=0.085)
+            results = [_evaluate_minigrid(args, agent, rng, eval_episodes=8) for agent in population]
+            scores = [
+                _subgoal_result_score(result, len(motif_bank), 0.0, args.max_steps, phase) + 0.04 * result.success_rate
+                for result in results
+            ]
+            after = max(results, key=lambda result: _result_rank(result, args.max_steps))
+            replay_improvement_delta = after.score - before.score
+            hall_of_fame = _update_hof_minigrid(args, hall_of_fame, population, rng)
+            population = evolve_population(population, scores, rng, elite_frac=0.35, mutation_scale=0.018, mutation_rate=0.03)
+            population[: len(hall_of_fame)] = [agent.clone() for agent in hall_of_fame]
+
+        phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
+
+        if gen % args.eval_every == 0 or gen == args.generations:
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
+            if best.success_rate > 0.0 and first_success_generation < 0:
+                first_success_generation = gen
+            if best.score > best_seen_score:
+                best_seen_score = best.score
+                best_score_generation = gen
+            candidate = motif_bank.kind_count("candidate") + motif_bank.kind_count("subgoal")
+            rows.append(
+                _row(
+                    method,
+                    gen,
+                    best,
+                    archive,
+                    schedule[phase_index],
+                    active_niches=len(niche_archive),
+                    stress_pass_rate=stress_pass_rate,
+                    replay_bank_size=len(replay_bank),
+                    motif_count=len(motif_bank),
+                    first_success_generation=first_success_generation,
+                    best_score_generation=best_score_generation,
+                    confirmed_motif_count=motif_bank.kind_count("confirmed"),
+                    candidate_motif_count=candidate,
+                    candidate_motif_ratio=candidate / max(1, len(motif_bank)),
+                    motif_bank_fill_generation=motif_bank_fill_generation,
+                    replay_improvement_delta=replay_improvement_delta,
+                    subgoal_motif_count=subgoal_motif_count,
+                    transition_motif_count=transition_motif_count,
                 )
             )
     env.close()
@@ -1397,7 +1626,7 @@ def _run_cyclic_resource_ecology_replay(args, rng):
         phase_index, phase_age = _advance_phase(schedule, phase_index, phase_age, phase_len)
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(
                 _row(
                     method,
@@ -1493,7 +1722,7 @@ def _run_cyclic_three_phase(args, rng):
             phase_age = 0
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, agent, rng) for agent in population + hall_of_fame), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(_row(method, gen, best, archive, phases[phase_index]))
     env.close()
     return rows
@@ -1600,7 +1829,7 @@ def _run_map_elites_lite(args, rng):
                 elites[descriptor] = MapElite(agent.clone(), result.score)
 
         if gen % args.eval_every == 0 or gen == args.generations:
-            best = max((_evaluate_minigrid(args, elite.agent, rng) for elite in elites.values()), key=lambda r: r.score)
+            best = max((_evaluate_minigrid(args, elite.agent, rng) for elite in elites.values()), key=lambda result: _result_rank(result, args.max_steps))
             rows.append(_row(method, gen, best, archive, f"cells={len(elites)}"))
     env.close()
     return rows
@@ -1790,6 +2019,29 @@ def _add_bootstrap_memory(
     return False, False
 
 
+def _add_subgoal_memory(
+    args,
+    replay_bank: SuccessReplayBank,
+    motif_bank: ScoredMotifBank,
+    rollout: Rollout,
+    novelty: float,
+) -> str | None:
+    kind = motif_bank.add_rollout(rollout, args.max_steps, novelty)
+    if kind and kind.startswith("confirmed"):
+        replay_bank.add(rollout)
+        return kind
+    if kind is not None:
+        return kind
+    diagnostics = analyze_rollout(rollout, args.max_steps)
+    return motif_bank.add_subgoal(
+        rollout,
+        diagnostics.subgoal_score,
+        diagnostics.region_transition_count,
+        diagnostics.new_region_count,
+        novelty,
+    )
+
+
 def _strict_subgoal_motif(rollout: Rollout, max_steps: int) -> bool:
     if rollout.success:
         return False
@@ -1818,6 +2070,56 @@ def _bootstrap_rollout_score(
         return 0.30 * proxy.success_rate + 0.28 * speed + 0.18 * progress + 0.14 * motif_reuse + 0.10 * subgoal
     coverage = len(set(rollout.positions)) / max_steps
     return 0.40 * novelty + 0.22 * coverage + 0.18 * progress + 0.12 * subgoal + 0.08 * speed
+
+
+def _subgoal_rollout_score(
+    rollout: Rollout,
+    archive: NoveltyArchive,
+    motif_count: int,
+    max_steps: int,
+    phase: str,
+) -> float:
+    diagnostics = analyze_rollout(rollout, max_steps)
+    novelty = archive.trajectory_novelty(rollout.positions)
+    proxy = _rollout_eval_proxy(rollout, max_steps)
+    speed = 1.0 - min(proxy.avg_steps, max_steps) / max_steps
+    motif_reuse = min(1.0, motif_count / 48.0)
+    diagnostic = diagnostics.subgoal_score
+    if phase in {"operate", "subgoal_replay"}:
+        return 0.34 * proxy.success_rate + 0.26 * speed + 0.20 * diagnostic + 0.12 * motif_reuse + 0.08 * novelty
+    return 0.34 * novelty + 0.28 * diagnostic + 0.16 * min(1.0, diagnostics.new_region_count / 6.0) + 0.12 * motif_reuse + 0.10 * speed
+
+
+def _subgoal_result_score(
+    result: EvalResult,
+    motif_count: int,
+    novelty: float,
+    max_steps: int,
+    phase: str,
+) -> float:
+    speed = 1.0 - min(result.avg_steps, max_steps) / max_steps
+    diagnostic = _diagnostic_score(result, max_steps)
+    motif_reuse = min(1.0, motif_count / 48.0)
+    success_gate = result.success_rate**1.4
+    if phase in {"operate", "subgoal_replay"}:
+        return 0.42 * success_gate + 0.28 * speed + 0.16 * diagnostic + 0.10 * motif_reuse + 0.04 * result.stability
+    return 0.30 * success_gate + 0.26 * diagnostic + 0.18 * novelty + 0.16 * speed + 0.10 * motif_reuse
+
+
+def _diagnostic_score(result: EvalResult, max_steps: int) -> float:
+    diagnostics = getattr(result, "diagnostics", _empty_minigrid_diagnostics())
+    speed = 1.0 - min(result.avg_steps, max_steps) / max_steps
+    return (
+        0.42 * diagnostics.avg_subgoal_score
+        + 0.20 * min(1.0, diagnostics.avg_region_transitions / 8.0)
+        + 0.16 * min(1.0, diagnostics.avg_new_regions / 6.0)
+        + 0.12 * diagnostics.avg_mobility
+        + 0.10 * speed
+    )
+
+
+def _result_rank(result: EvalResult, max_steps: int) -> tuple[float, float]:
+    return result.score, _diagnostic_score(result, max_steps)
 
 
 def _evaluate_minigrid_stress(args, agent, rng, generation: int, eval_episodes: int = 4):
@@ -1977,8 +2279,11 @@ def _row(
     motif_bank_fill_generation: int = -1,
     replay_improvement_delta: float = 0.0,
     bootstrap_motif_count: int = 0,
+    subgoal_motif_count: int = 0,
+    transition_motif_count: int = 0,
 ):
     diagnostics = getattr(result, "diagnostics", _empty_minigrid_diagnostics())
+    primary_score = result.score
     return {
         "method": method,
         "generation": generation,
@@ -1987,6 +2292,14 @@ def _row(
         "test_avg_steps": round(result.avg_steps, 4),
         "test_stability": round(result.stability, 4),
         "test_score": round(result.score, 4),
+        "primary_score": round(primary_score, 4),
+        "diagnostic_score": round(
+            0.42 * diagnostics.avg_subgoal_score
+            + 0.20 * min(1.0, diagnostics.avg_region_transitions / 8.0)
+            + 0.16 * min(1.0, diagnostics.avg_new_regions / 6.0)
+            + 0.12 * diagnostics.avg_mobility,
+            4,
+        ),
         "subgoal_score": round(diagnostics.avg_subgoal_score, 4),
         "best_subgoal_score": round(diagnostics.best_subgoal_score, 4),
         "region_transition_count": round(diagnostics.avg_region_transitions, 4),
@@ -2014,6 +2327,8 @@ def _row(
         "motif_bank_fill_generation": motif_bank_fill_generation,
         "replay_improvement_delta": round(replay_improvement_delta, 4),
         "bootstrap_motif_count": bootstrap_motif_count,
+        "subgoal_motif_count": subgoal_motif_count,
+        "transition_motif_count": transition_motif_count,
     }
 
 

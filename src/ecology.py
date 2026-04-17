@@ -123,6 +123,43 @@ class ScoredMotifBank:
             return None
 
         base_score = motif_quality(rollout, max_steps, novelty, kind)
+        self._add_spans(rollout, base_score, kind, window)
+        if kind.startswith("confirmed"):
+            self.confirmed_count += 1
+        else:
+            self.candidate_count += 1
+        return kind
+
+    def add_subgoal(
+        self,
+        rollout: Rollout,
+        subgoal_score: float,
+        region_transitions: int,
+        new_regions: int,
+        novelty: float = 0.0,
+        window: int = 10,
+    ) -> str | None:
+        if rollout.success or len(rollout.actions) < 2:
+            return None
+        if subgoal_score < 0.16:
+            return None
+        if region_transitions < 1 and new_regions < 2:
+            return None
+
+        kind = "subgoal_transition" if region_transitions >= 1 else "subgoal_exploration"
+        mobility = rollout_mobility(rollout)
+        base_score = (
+            0.42 * subgoal_score
+            + 0.22 * min(1.0, region_transitions / 8.0)
+            + 0.16 * min(1.0, new_regions / 6.0)
+            + 0.12 * mobility
+            + 0.08 * novelty
+        )
+        self._add_spans(rollout, base_score, kind, window)
+        self.candidate_count += 1
+        return kind
+
+    def _add_spans(self, rollout: Rollout, base_score: float, kind: str, window: int) -> None:
         spans = _motif_spans(rollout, window)
         for start, end in spans:
             states = tuple(rollout.states[start : end + 1])
@@ -132,11 +169,6 @@ class ScoredMotifBank:
                 self.items.append(ScoredMotif(states, actions, base_score + 0.08 * mobility, kind))
         self.items.sort(key=lambda item: item.score, reverse=True)
         del self.items[self.max_items :]
-        if kind.startswith("confirmed"):
-            self.confirmed_count += 1
-        else:
-            self.candidate_count += 1
-        return kind
 
     def reinforce(self, agent: QAgent, rng: np.random.Generator, passes: int = 3, reward: float = 0.08) -> None:
         if not self.items:
@@ -145,7 +177,12 @@ class ScoredMotifBank:
         weights = weights / weights.sum()
         for _ in range(passes):
             item = self.items[int(rng.choice(len(self.items), p=weights))]
-            kind_reward = reward if item.kind.startswith("confirmed") else reward * 0.45
+            if item.kind.startswith("confirmed"):
+                kind_reward = reward
+            elif item.kind.startswith("subgoal"):
+                kind_reward = reward * 0.55
+            else:
+                kind_reward = reward * 0.45
             reinforce_action_trace(agent, item.states, item.actions, kind_reward)
 
     def kind_count(self, prefix: str) -> int:
