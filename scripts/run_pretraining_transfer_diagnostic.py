@@ -24,6 +24,7 @@ from minigrid_diagnostics import summarize_rollouts
 from pretraining.minigrid_schedules import build_pretrain_artifact
 from pretraining.minigrid_schedules import run_minigrid_episode
 from transfer.evaluator import AdaptationConfig, evaluate_scratch, evaluate_transfer
+from transfer.evaluator import TargetReuseConfig, evaluate_transfer_with_target_reuse
 
 
 DEFAULT_METHODS = (
@@ -53,6 +54,10 @@ SUMMARY_METRICS = [
     "target_probe_new_regions",
     "target_probe_mobility",
     "target_probe_success",
+    "target_reuse_item_count",
+    "target_reuse_avg_item_score",
+    "target_reuse_best_item_score",
+    "target_reuse_probe_success",
 ]
 
 
@@ -76,6 +81,10 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=4)
     parser.add_argument("--threshold", type=float, default=0.10)
     parser.add_argument("--methods", default=DEFAULT_METHODS)
+    parser.add_argument("--include-target-reuse", action="store_true")
+    parser.add_argument("--reuse-probe-episodes", type=int, default=6)
+    parser.add_argument("--reuse-reinforce-passes", type=int, default=4)
+    parser.add_argument("--reuse-reward", type=float, default=0.075)
     parser.add_argument("--output", type=Path, default=ROOT / "outputs" / "pretraining_transfer_diagnostic.csv")
     parser.add_argument(
         "--summary-output",
@@ -111,6 +120,11 @@ def main() -> None:
                 epsilon=args.adapt_epsilon,
                 threshold=args.threshold,
             )
+            reuse_config = TargetReuseConfig(
+                probe_episodes=args.reuse_probe_episodes,
+                reinforce_passes=args.reuse_reinforce_passes,
+                reward=args.reuse_reward,
+            )
             scratch_report, _scratch_points = evaluate_scratch(target_spec, seed + 1000 + target_idx * 10000, config)
             scratch_row = _report_row(scratch_report, {}, seed)
             rows.append(scratch_row)
@@ -128,6 +142,35 @@ def main() -> None:
                 row = _report_row(report, artifact.metadata, seed, probe)
                 rows.append(row)
                 print(_format_progress(row))
+                if args.include_target_reuse:
+                    reuse_report, _reuse_points, reuse_summary = evaluate_transfer_with_target_reuse(
+                        artifact,
+                        target_spec,
+                        seed + 6000 + target_idx * 10000 + idx * 100,
+                        config,
+                        reuse_config,
+                        scratch_final_score=scratch_report.final_score,
+                    )
+                    reuse_probe = _target_probe(
+                        target_spec,
+                        artifact.best_agent(),
+                        seed + 5000 + target_idx * 10000 + idx * 100,
+                        args.eval_episodes,
+                    )
+                    reuse_row = _report_row(
+                        reuse_report,
+                        artifact.metadata,
+                        seed,
+                        reuse_probe,
+                        {
+                            "target_reuse_item_count": reuse_summary.item_count,
+                            "target_reuse_avg_item_score": reuse_summary.avg_item_score,
+                            "target_reuse_best_item_score": reuse_summary.best_item_score,
+                            "target_reuse_probe_success": reuse_summary.probe_success_rate,
+                        },
+                    )
+                    rows.append(reuse_row)
+                    print(_format_progress(reuse_row))
 
     summary_rows = _summary_rows(rows)
     _write_csv(args.output, rows)
@@ -141,6 +184,7 @@ def _report_row(
     metadata: dict[str, Any],
     experiment_seed: int,
     target_probe: dict[str, Any] | None = None,
+    target_reuse: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     row = asdict(report)
     row["experiment_seed"] = experiment_seed
@@ -157,8 +201,14 @@ def _report_row(
     row["target_probe_new_regions"] = ""
     row["target_probe_mobility"] = ""
     row["target_probe_success"] = ""
+    row["target_reuse_item_count"] = ""
+    row["target_reuse_avg_item_score"] = ""
+    row["target_reuse_best_item_score"] = ""
+    row["target_reuse_probe_success"] = ""
     if target_probe is not None:
         row.update(target_probe)
+    if target_reuse is not None:
+        row.update(target_reuse)
     row["artifact_metadata_json"] = json.dumps(metadata, sort_keys=True)
     return row
 

@@ -582,6 +582,88 @@ target-side artifact reuse must become an adaptation mechanism,
 not just a diagnostic.
 ```
 
+## Target Reuse V1
+
+Target-side artifact reuse has been implemented as an adaptation option.
+
+Mechanism:
+
+```text
+1. Clone the pretraining artifact's best agent.
+2. Probe it on the target env with small epsilon.
+3. Keep target probe rollouts with useful subgoal, mobility, region-transition, or success signal.
+4. Convert those rollouts into target reuse items.
+5. During early target adaptation, reinforce those target-side traces before normal Q-learning episodes.
+```
+
+The diagnostic runner enables this with:
+
+```text
+--include-target-reuse
+```
+
+Command:
+
+```bash
+uv run python scripts/run_pretraining_transfer_diagnostic.py \
+  --seeds 7,17,27 \
+  --target-envs MiniGrid-MultiRoom-N2-S4-v0,MiniGrid-MultiRoom-N4-S5-v0 \
+  --pretrain-episodes 40 \
+  --adapt-episodes 30 \
+  --eval-every 10 \
+  --eval-episodes 4 \
+  --include-target-reuse \
+  --output outputs/pretraining_transfer_reuse_v1.csv \
+  --summary-output outputs/pretraining_transfer_reuse_v1_summary.csv
+```
+
+Engineering fix:
+
+```text
+QAgent.clone no longer shares the same RNG object.
+PretrainArtifact.best_agent now returns a deterministic seeded clone.
+```
+
+This matters because ordinary transfer and target-reuse transfer must not perturb each other through shared random tie-breaking.
+
+Result:
+
+| Target | Method | Final | AUC | Reuse Items | Avg Reuse Score | Best Reuse Score |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `N2-S4` | `simple_q_pretrain+target_reuse` | `0.0000` | `0.0000` | `2.6667` | `0.2230` | `0.3125` |
+| `N2-S4` | `operate_replay_pretrain+target_reuse` | `0.0000` | `0.0000` | `5.0000` | `0.2549` | `0.4156` |
+| `N2-S4` | `cyclic_motif_fast_replay_pretrain+target_reuse` | `0.0000` | `0.0000` | `5.3333` | `0.1818` | `0.4315` |
+| `N2-S4` | `cyclic_subgoal_ecology_replay_pretrain+target_reuse` | `0.0000` | `0.0000` | `5.0000` | `0.2978` | `0.5208` |
+| `N4-S5` | `simple_q_pretrain+target_reuse` | `0.0000` | `0.0000` | `4.0000` | `0.2902` | `0.4512` |
+| `N4-S5` | `operate_replay_pretrain+target_reuse` | `0.0000` | `0.0000` | `5.0000` | `0.1802` | `0.4147` |
+| `N4-S5` | `cyclic_motif_fast_replay_pretrain+target_reuse` | `0.0000` | `0.0000` | `5.6667` | `0.3177` | `0.5375` |
+| `N4-S5` | `cyclic_subgoal_ecology_replay_pretrain+target_reuse` | `0.0000` | `0.0000` | `5.6667` | `0.2028` | `0.4647` |
+
+Interpretation:
+
+This is another useful negative result:
+
+```text
+target reuse items exist;
+they have measurable target-side structure;
+this simple trace reinforcement still does not convert them into target success.
+```
+
+So the bottleneck has moved one step deeper:
+
+```text
+not "can we find target-side reusable traces?"
+but "can we compose or execute them as reusable skills/options?"
+```
+
+The next version should not just increase trace replay reward. It should test whether target reuse should become:
+
+```text
+short option execution,
+subgoal-conditioned exploration,
+or a temporary behavior prior during early adaptation.
+```
+
 ## Decision Rule
 
 After the framework exists, new cycle variants should only be promoted when they improve at least one of:

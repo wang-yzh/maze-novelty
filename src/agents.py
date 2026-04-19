@@ -33,7 +33,13 @@ class QAgent:
         self.rng = rng
 
     def clone(self) -> "QAgent":
-        child = QAgent(self.q.shape[0], self.q.shape[1], self.rng, self.alpha, self.gamma)
+        child_seed = int(self.rng.integers(0, np.iinfo(np.uint32).max))
+        child = QAgent(self.q.shape[0], self.q.shape[1], np.random.default_rng(child_seed), self.alpha, self.gamma)
+        child.q = self.q.copy()
+        return child
+
+    def clone_with_seed(self, seed: int) -> "QAgent":
+        child = QAgent(self.q.shape[0], self.q.shape[1], np.random.default_rng(seed), self.alpha, self.gamma)
         child.q = self.q.copy()
         return child
 

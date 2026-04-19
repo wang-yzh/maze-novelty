@@ -27,9 +27,9 @@ class PretrainArtifact:
 
     def best_agent(self) -> QAgent:
         if self.hall_of_fame:
-            return self.hall_of_fame[0].clone()
+            return self.hall_of_fame[0].clone_with_seed(self.seed + 17)
         if self.population:
-            return self.population[0].clone()
+            return self.population[0].clone_with_seed(self.seed + 17)
         raise ValueError("pretrain artifact has no agents")
 
     def summary(self) -> ArtifactSummary:
