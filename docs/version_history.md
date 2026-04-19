@@ -560,6 +560,47 @@ The validation standard is now stricter: a claimed pretraining benefit must beat
 scratch, random artifact control, and shuffled prior control across multiple
 seeds.
 
+### Untagged: `multiseed pretraining benefit result`
+
+Recorded:
+
+- a three-seed longitudinal validation over FourRooms, MultiRoom N2-S4, and
+  MultiRoom N4-S5;
+- `operate_replay_pretrain`, `cyclic_motif_fast_replay_pretrain`, and
+  `cyclic_subgoal_ecology_replay_pretrain`;
+- scratch, pretrained-agent, target-reuse, shuffled-prior, and random-artifact
+  control conditions.
+
+Result:
+
+The run did not validate robust pretraining benefit.
+
+FourRooms produced nonzero outcomes, but scratch had the strongest mean
+adaptation AUC:
+
+```text
+scratch AUC = 0.2047
+best target_reuse AUC = 0.1715
+```
+
+Both hard MultiRoom targets were all-zero at the task level:
+
+```text
+final_score = 0
+adaptation_auc = 0
+adaptation_auc_lift = 0
+```
+
+The strongest warning came from controls. Shuffled-prior and random-artifact
+conditions could produce substantial region changes, sometimes matching or
+exceeding true target reuse.
+
+Lesson:
+
+Region changes, prior executions, and other structural proxy metrics are now
+diagnostics only. They are not evidence of transfer benefit unless they predict
+task-level adaptation and beat scratch, shuffled, and random controls.
+
 ## Current State
 
 Current branch:
