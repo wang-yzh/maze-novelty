@@ -42,6 +42,16 @@ The latest writeup for that step is:
 
 - `docs/v1.4.7_behavior_prior_transfer.md`
 
+## Visual Snapshot
+
+Early GridWorld experiment snapshot:
+
+![GridWorld summary metrics](docs/figures/gridworld_summary.png)
+
+Representative path behavior across baseline methods:
+
+![GridWorld path comparison](docs/figures/gridworld_paths.png)
+
 ## Main Method Families
 
 The repo has accumulated several related method families. The most important
