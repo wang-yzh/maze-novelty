@@ -256,6 +256,37 @@ simple Q pretraining on source env -> target adaptation
 
 This does not yet evaluate all cycle models. Its purpose is to prove the evaluation protocol works.
 
+## First Cycle Adapter
+
+The first existing cycle schedule has now been connected to the pretraining frame:
+
+```text
+operate_replay_pretrain
+```
+
+It is intentionally conservative:
+
+```text
+source env only
+single inherited Q artifact
+success replay bank populated only by successful source rollouts
+phase loop: explore -> operate -> replay
+```
+
+The goal is not to fully reproduce every historical maze experiment. The goal is to make old winners participate in the new question:
+
+```text
+Does this schedule create a better starting condition for target adaptation?
+```
+
+This adapter is now the reference path for adding later schedules:
+
+```text
+cyclic_motif_fast_replay
+cyclic_subgoal_ecology_replay
+ecology variants
+```
+
 ## First Smoke Test
 
 Recommended source:
@@ -310,6 +341,36 @@ The first smoke result does not show transfer. That is expected with tiny budget
 ```text
 source pretraining -> artifact -> target adaptation -> transfer report
 ```
+
+## Multi-Method Smoke Test
+
+Command:
+
+```bash
+uv run python scripts/run_pretraining_transfer_smoke.py \
+  --source-env MiniGrid-FourRooms-v0 \
+  --target-env MiniGrid-MultiRoom-N4-S5-v0 \
+  --seed 7 \
+  --state-encoder geometry \
+  --pretrain-episodes 20 \
+  --adapt-episodes 20 \
+  --eval-every 10 \
+  --eval-episodes 3 \
+  --pretrain-methods simple_q_pretrain,operate_replay_pretrain \
+  --output outputs/pretraining_transfer_smoke_v1.csv
+```
+
+Result:
+
+| Method | Zero-Shot | Adaptation AUC | First Success | Final Score | Transfer Lift |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `scratch` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+| `simple_q_pretrain` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+| `operate_replay_pretrain` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+
+Interpretation:
+
+This still does not demonstrate transfer. It does demonstrate that multiple pretraining schedules can now be evaluated by the same report object and CSV output. That is the required foundation before we compare cycle designs instead of maze-specific final scores.
 
 ## Decision Rule
 

@@ -15,7 +15,8 @@ os.environ.setdefault("XDG_CACHE_HOME", str(ROOT / ".cache"))
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 from minigrid_adapter import MiniGridSpec
-from transfer.evaluator import AdaptationConfig, evaluate_scratch, evaluate_transfer, pretrain_q_agent
+from pretraining.minigrid_schedules import build_pretrain_artifact
+from transfer.evaluator import AdaptationConfig, evaluate_scratch, evaluate_transfer
 
 
 def main() -> None:
@@ -27,6 +28,11 @@ def main() -> None:
     parser.add_argument("--state-encoder", choices=["compact", "geometry"], default="geometry")
     parser.add_argument("--pretrain-episodes", type=int, default=80)
     parser.add_argument("--pretrain-epsilon", type=float, default=0.25)
+    parser.add_argument(
+        "--pretrain-methods",
+        default="simple_q_pretrain,operate_replay_pretrain",
+        help="Comma-separated pretraining methods to compare.",
+    )
     parser.add_argument("--adapt-episodes", type=int, default=60)
     parser.add_argument("--adapt-epsilon", type=float, default=0.18)
     parser.add_argument("--eval-every", type=int, default=10)
@@ -46,16 +52,26 @@ def main() -> None:
     )
 
     scratch_report, _scratch_points = evaluate_scratch(target_spec, args.seed + 1000, config)
-    artifact = pretrain_q_agent(source_spec, args.seed + 2000, args.pretrain_episodes, args.pretrain_epsilon)
-    pretrain_report, _pretrain_points = evaluate_transfer(
-        artifact,
-        target_spec,
-        args.seed + 3000,
-        config,
-        scratch_final_score=scratch_report.final_score,
-    )
+    methods = [method.strip() for method in args.pretrain_methods.split(",") if method.strip()]
+    reports = []
+    for idx, method in enumerate(methods):
+        artifact = build_pretrain_artifact(
+            method,
+            source_spec,
+            args.seed + 2000 + idx * 100,
+            args.pretrain_episodes,
+            args.pretrain_epsilon,
+        )
+        report, _points = evaluate_transfer(
+            artifact,
+            target_spec,
+            args.seed + 3000 + idx * 100,
+            config,
+            scratch_final_score=scratch_report.final_score,
+        )
+        reports.append(report)
 
-    rows = [asdict(scratch_report), asdict(pretrain_report)]
+    rows = [asdict(scratch_report), *[asdict(report) for report in reports]]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
