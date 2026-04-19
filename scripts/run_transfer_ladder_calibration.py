@@ -57,11 +57,15 @@ class LadderTargetSummary:
     max_final: float
     best_real_condition: str
     best_real_source: str
+    best_real_runs: int
+    best_real_positive_auc_lift_count: int
     best_real_auc: float
     best_real_auc_lift: float
     best_real_final: float
     best_control_condition: str
     best_control_source: str
+    best_control_runs: int
+    best_control_positive_auc_lift_count: int
     best_control_auc: float
     best_control_final: float
     best_real_region_changes: float
@@ -215,6 +219,10 @@ def classify_target(
     best_real_auc = _float(best_real.get("adaptation_auc_mean", ""))
     best_real_lift = _float(best_real.get("adaptation_auc_lift_mean", ""))
     best_control_auc = _float(best_control.get("adaptation_auc_mean", ""))
+    best_real_runs = _int(best_real.get("runs", ""))
+    best_real_positive_auc_lift_count = _int(best_real.get("positive_auc_lift_count", ""))
+    best_control_runs = _int(best_control.get("runs", ""))
+    best_control_positive_auc_lift_count = _int(best_control.get("positive_auc_lift_count", ""))
 
     tier, reason = _tier_reason(
         target_env=target_env,
@@ -224,6 +232,8 @@ def classify_target(
         max_final=max_final,
         best_real_auc=best_real_auc,
         best_real_lift=best_real_lift,
+        best_real_runs=best_real_runs,
+        best_real_positive_auc_lift_count=best_real_positive_auc_lift_count,
         best_control_auc=best_control_auc,
         config=config,
     )
@@ -238,11 +248,15 @@ def classify_target(
         max_final=max_final,
         best_real_condition=best_real.get("condition", ""),
         best_real_source=best_real.get("source_method", ""),
+        best_real_runs=best_real_runs,
+        best_real_positive_auc_lift_count=best_real_positive_auc_lift_count,
         best_real_auc=best_real_auc,
         best_real_auc_lift=best_real_lift,
         best_real_final=_float(best_real.get("final_score_mean", "")),
         best_control_condition=best_control.get("condition", ""),
         best_control_source=best_control.get("source_method", ""),
+        best_control_runs=best_control_runs,
+        best_control_positive_auc_lift_count=best_control_positive_auc_lift_count,
         best_control_auc=best_control_auc,
         best_control_final=_float(best_control.get("final_score_mean", "")),
         best_real_region_changes=_float(
@@ -264,6 +278,8 @@ def _tier_reason(
     max_final: float,
     best_real_auc: float,
     best_real_lift: float,
+    best_real_runs: int,
+    best_real_positive_auc_lift_count: int,
     best_control_auc: float,
     config: LadderDecisionConfig,
 ) -> tuple[str, str]:
@@ -276,6 +292,8 @@ def _tier_reason(
     if best_real_auc > config.min_signal_auc and best_control_auc + config.control_margin >= best_real_auc:
         return "control_confounded", "negative controls match or exceed the best real pretraining signal"
     if best_real_lift > config.lift_margin and best_real_auc > best_control_auc + config.control_margin:
+        if best_real_runs > 1 and best_real_positive_auc_lift_count < best_real_runs:
+            return "unstable_transfer_signal", "mean clears margins but positive lift is not stable across seeds"
         return "candidate_transfer_signal", "real pretraining clears scratch lift and negative-control margins"
     return "measurable_candidate", "task has nonzero signal but no clean transfer claim yet"
 
@@ -411,6 +429,15 @@ def _float(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _int(value: object) -> int:
+    if not isinstance(value, int | float | str):
+        return 0
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 if __name__ == "__main__":

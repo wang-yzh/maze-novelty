@@ -118,6 +118,34 @@ def test_classify_candidate_transfer_signal() -> None:
     assert summary.tier == "candidate_transfer_signal"
 
 
+def test_classify_unstable_transfer_signal_when_only_one_seed_lifts() -> None:
+    summary = classify_target(
+        [
+            _row("MiniGrid-Dynamic-Obstacles-16x16-v0", "scratch", "scratch", auc=0.0, runs=2),
+            _row(
+                "MiniGrid-Dynamic-Obstacles-16x16-v0",
+                "target_reuse",
+                "cyclic_motif_fast_replay_pretrain",
+                auc=0.14,
+                auc_lift=0.14,
+                runs=2,
+                positive_auc_lift_count=1,
+            ),
+            _row(
+                "MiniGrid-Dynamic-Obstacles-16x16-v0",
+                "shuffled_prior_control",
+                "cyclic_motif_fast_replay_pretrain",
+                auc=0.0,
+                runs=2,
+            ),
+        ],
+        "MiniGrid-FourRooms-v0",
+        LadderDecisionConfig(),
+    )
+
+    assert summary.tier == "unstable_transfer_signal"
+
+
 def _row(
     target: str,
     condition: str,
@@ -127,11 +155,17 @@ def _row(
     auc_lift: float = 0.0,
     final: float = 0.0,
     region_changes: float = 0.0,
+    runs: int = 1,
+    positive_auc_lift_count: int | None = None,
 ) -> dict[str, str]:
+    if positive_auc_lift_count is None:
+        positive_auc_lift_count = 1 if auc_lift > 0.0 else 0
     return {
         "target_env": target,
         "condition": condition,
         "source_method": source,
+        "runs": str(runs),
+        "positive_auc_lift_count": str(positive_auc_lift_count),
         "adaptation_auc_mean": str(auc),
         "adaptation_auc_lift_mean": str(auc_lift),
         "final_score_mean": str(final),

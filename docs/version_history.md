@@ -622,6 +622,37 @@ The next benchmark should be selected for interpretability, not just difficulty.
 A useful target must distinguish real pretraining benefit from scratch luck,
 random-artifact movement, shuffled-prior movement, and total sparse failure.
 
+### Untagged: `transfer ladder sweep result`
+
+Ran:
+
+- a two-seed transfer ladder sweep over FourRooms, Dynamic-Obstacles,
+  SimpleCrossing, and MultiRoom targets;
+- the current longitudinal validation controls;
+- a conservative ladder reclassification pass.
+
+Result:
+
+No target produced a clean stable transfer-benefit claim.
+
+The most useful new signal came from Dynamic-Obstacles:
+
+```text
+Dynamic-Obstacles-16x16 best real AUC = 0.1443
+Dynamic-Obstacles-8x8 best real AUC = 0.0729
+best controls = 0.0000
+```
+
+However, both positive signals appeared in only one of two seeds, so the ladder
+classifier now labels them `unstable_transfer_signal` instead of
+`candidate_transfer_signal`.
+
+Lesson:
+
+Dynamic-Obstacles is the best next confirmation family. SimpleCrossing is useful
+as a control-confounding detector, while MultiRoom remains too sparse under the
+current budget.
+
 ## Current State
 
 Current branch:
