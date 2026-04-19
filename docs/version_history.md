@@ -474,6 +474,34 @@ The next breakthrough is unlikely to come from another global continuation rule.
 The project needs semantic behavior priors: intent, effect contract, and local
 re-execution policy rather than only state match plus action trace.
 
+### Untagged: `semantic behavior prior prototype`
+
+Added:
+
+- `semantic_intents` target-reuse execution mode;
+- semantic executors for `forward_run`, `region_transition`, and `unstuck`;
+- local geometry action selection from the current state signature;
+- trace-as-budget execution for supported semantic priors;
+- semantic execution CLI override through `--reuse-execution-mode`;
+- tests for semantic selection, semantic action choice, and library fallback.
+
+Result:
+
+Hard-task final scores remained zero, but the structural execution signal
+improved sharply in the quick diagnostic:
+
+```text
+motif N4-S5: completed 26 -> 94, aborted 63 -> 0
+motif N4-S5: avg transitions 9.00 -> 16.75
+ecology N4-S5: avg transitions 9.25 -> 22.75
+```
+
+Lesson:
+
+The action-trace representation was a real bottleneck. Semantic execution can
+turn fragile priors into sustained local behavior, but the next unsolved problem
+is composition: movement has to become solved episodes.
+
 ## Current State
 
 Current branch:

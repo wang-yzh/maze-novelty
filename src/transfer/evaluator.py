@@ -195,6 +195,10 @@ class PriorStepAssessment:
     abort_reason: str = ""
 
 
+SEMANTIC_INTENT_EXECUTION = "semantic_intents"
+SEMANTIC_PRIOR_KINDS = frozenset({"forward_run", "region_transition", "unstuck"})
+
+
 def pretrain_q_agent(
     spec: MiniGridSpec,
     seed: int,
@@ -602,7 +606,7 @@ def _build_prior_library(
 ) -> BehaviorLibrary | None:
     if not reuse_items or config.max_library_items <= 0:
         return None
-    if config.execution_mode != "motif_fragments":
+    if config.execution_mode not in {"motif_fragments", SEMANTIC_INTENT_EXECUTION}:
         library = BehaviorLibrary(max_items=config.max_library_items, match_mode=config.match_mode)
         for item in reuse_items:
             prior = item.prior
@@ -613,8 +617,9 @@ def _build_prior_library(
             library.add(prior)
         return library if len(library) else None
 
-    # Motif-fragment mode should prefer repeated non-fallback fragments, but it
-    # should not go silent if the budget is too small for high-support motifs.
+    # Fragment-like modes should prefer repeated non-fallback fragments, but
+    # they should not go silent if the budget is too small for high-support
+    # motifs.
     filter_stages = (
         (False, max(2, config.min_execution_support)),
         (False, 1),
@@ -890,6 +895,120 @@ def _is_passable_local_category(category: int) -> bool:
     return category in (0, 2)
 
 
+def _uses_semantic_prior_execution(execution_mode: str, prior: BehaviorPrior) -> bool:
+    return execution_mode == SEMANTIC_INTENT_EXECUTION and prior.kind in SEMANTIC_PRIOR_KINDS
+
+
+def _semantic_prior_action(
+    step_prior: ActivePriorExecution,
+    signature: StateSignature,
+) -> int:
+    kind = step_prior.prior.kind
+    if kind == "forward_run":
+        return _semantic_forward_run_action(signature, step_prior.prior.action_trace)
+    if kind == "region_transition":
+        return _semantic_region_transition_action(signature, step_prior.prior.action_trace)
+    if kind == "unstuck":
+        return _semantic_unstuck_action(signature, step_prior.prior.action_trace)
+    return int(step_prior.remaining_actions[0]) if step_prior.remaining_actions else 2
+
+
+def _semantic_forward_run_action(
+    signature: StateSignature,
+    action_trace: tuple[int, ...],
+) -> int:
+    if _is_passable_local_category(signature.local_shape[0]):
+        return 2
+    return _turn_toward_open_side(signature, action_trace)
+
+
+def _semantic_region_transition_action(
+    signature: StateSignature,
+    action_trace: tuple[int, ...],
+) -> int:
+    goal_action = _action_toward_visible_goal(signature)
+    if goal_action is not None:
+        return goal_action
+    if _is_passable_local_category(signature.local_shape[0]):
+        return 2
+    return _turn_toward_open_side(signature, action_trace)
+
+
+def _semantic_unstuck_action(
+    signature: StateSignature,
+    action_trace: tuple[int, ...],
+) -> int:
+    if _is_passable_local_category(signature.local_shape[0]):
+        return 2
+    return _turn_toward_open_side(signature, action_trace)
+
+
+def _action_toward_visible_goal(signature: StateSignature) -> int | None:
+    if signature.goal_bin == 4:
+        return None
+    horizontal = signature.goal_bin // 3
+    vertical = signature.goal_bin % 3
+    if horizontal < 1:
+        return 0
+    if horizontal > 1:
+        return 1
+    if vertical <= 1 and _is_passable_local_category(signature.local_shape[0]):
+        return 2
+    return None
+
+
+def _turn_toward_open_side(
+    signature: StateSignature,
+    action_trace: tuple[int, ...],
+) -> int:
+    left_open = _is_passable_local_category(signature.local_shape[3])
+    right_open = _is_passable_local_category(signature.local_shape[4])
+    if left_open and not right_open:
+        return 0
+    if right_open and not left_open:
+        return 1
+    preferred_turn = _first_turn_action(action_trace)
+    if preferred_turn is not None:
+        return preferred_turn
+    return 0 if left_open else 1
+
+
+def _first_turn_action(action_trace: tuple[int, ...]) -> int | None:
+    for action in action_trace:
+        if action in (0, 1):
+            return int(action)
+    return None
+
+
+def _expected_effect_from_signature(action: int, signature: StateSignature) -> str:
+    if action == 0:
+        return "turn_left"
+    if action == 1:
+        return "turn_right"
+    if action == 2:
+        return "forward_move" if _is_passable_local_category(signature.local_shape[0]) else "forward_blocked"
+    return "unknown"
+
+
+def _next_prior_execution_action(
+    step_prior: ActivePriorExecution,
+    execution_mode: str,
+    signature: StateSignature,
+) -> tuple[int, StateSignature | None, str | None]:
+    action = step_prior.remaining_actions.pop(0)
+    if _uses_semantic_prior_execution(execution_mode, step_prior.prior):
+        semantic_action = _semantic_prior_action(step_prior, signature)
+        return semantic_action, None, _expected_effect_from_signature(semantic_action, signature)
+
+    expected_signature = None
+    expected_effect = None
+    if step_prior.remaining_signatures:
+        expected_signature = step_prior.remaining_signatures.pop(0)
+    if step_prior.remaining_effects:
+        expected_effect = step_prior.remaining_effects.pop(0)
+    return action, expected_signature, expected_effect
+
+
 def _first_step_effect_matches(
     prior: BehaviorPrior,
     signature: StateSignature,
@@ -925,6 +1044,17 @@ def _first_step_effect_matches(
             return True
         return prior.signature_trace[1].local_shape[0] == signature.local_shape[4]
     return True
+
+
+def _prior_effect_matches_for_execution(
+    prior: BehaviorPrior,
+    signature: StateSignature,
+    execution_mode: str,
+    effect_match_mode: str,
+) -> bool:
+    if _uses_semantic_prior_execution(execution_mode, prior):
+        return True
+    return _first_step_effect_matches(prior, signature, effect_match_mode)
 
 
 def _assess_prior_execution_step(
@@ -1175,10 +1305,20 @@ def _select_prior_for_execution(
         prior
         for prior in prior_library.priors
         if prior.matches(signature, mode=prior_library.match_mode)
-        and _first_step_effect_matches(prior, signature, effect_match_mode)
+        and _prior_effect_matches_for_execution(prior, signature, execution_mode, effect_match_mode)
     ]
     if not candidates:
         return None
+    if execution_mode == SEMANTIC_INTENT_EXECUTION:
+        return max(
+            candidates,
+            key=lambda prior: (
+                prior.kind in SEMANTIC_PRIOR_KINDS,
+                prior.score,
+                prior.support,
+                -len(prior.action_trace),
+            ),
+        )
     if execution_mode == "motif_fragments":
         return max(candidates, key=lambda prior: (prior.support, -len(prior.action_trace), prior.score))
     return max(candidates, key=lambda prior: (prior.score, prior.support, -len(prior.action_trace)))
@@ -1218,11 +1358,11 @@ def _run_episode(
         if executing_prior:
             assert active_prior is not None
             step_prior = active_prior
-            action = active_prior.remaining_actions.pop(0)
-            if active_prior.remaining_signatures:
-                expected_signature = active_prior.remaining_signatures.pop(0)
-            if active_prior.remaining_effects:
-                expected_effect = active_prior.remaining_effects.pop(0)
+            action, expected_signature, expected_effect = _next_prior_execution_action(
+                active_prior,
+                execution_mode,
+                env.state_signature,
+            )
         else:
             matched_prior = None
             if prior_library is not None and prior_execute_prob > 0.0:
@@ -1243,11 +1383,11 @@ def _run_episode(
                 )
                 if active_prior is not None:
                     step_prior = active_prior
-                    action = active_prior.remaining_actions.pop(0)
-                    if active_prior.remaining_signatures:
-                        expected_signature = active_prior.remaining_signatures.pop(0)
-                    if active_prior.remaining_effects:
-                        expected_effect = active_prior.remaining_effects.pop(0)
+                    action, expected_signature, expected_effect = _next_prior_execution_action(
+                        active_prior,
+                        execution_mode,
+                        env.state_signature,
+                    )
                     if execution_stats is not None:
                         _record_prior_start(execution_stats, active_prior)
                 else:

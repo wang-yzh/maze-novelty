@@ -194,6 +194,31 @@ def test_motif_fragment_library_falls_back_when_high_support_fragments_are_absen
     assert library.priors[0].kind == "forward_run"
 
 
+def test_semantic_intent_library_falls_back_when_high_support_fragments_are_absent() -> None:
+    low_support_motif = BehaviorPrior(
+        kind="forward_run",
+        initiation=_signature(direction=0, last_action=3),
+        action_trace=(2, 2),
+        termination=_signature(direction=0, last_action=2),
+        score=0.70,
+        support=1,
+        state_trace=(0, 1, 2),
+        signature_trace=(_signature(direction=0, last_action=3), _signature(direction=0, last_action=2), _signature(direction=0, last_action=2)),
+    )
+    config = TargetReuseConfig(
+        execution_mode="semantic_intents",
+        min_execution_support=2,
+        allow_trace_priors=False,
+        match_mode=DIRECTION_AGNOSTIC_MATCH,
+    )
+
+    library = _build_prior_library([TargetReuseItem(low_support_motif)], config)
+
+    assert library is not None
+    assert len(library.priors) == 1
+    assert library.priors[0].kind == "forward_run"
+
+
 def test_motif_fragment_selection_prefers_supported_shorter_prior() -> None:
     library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
     query = _signature(direction=1, last_action=3)
@@ -324,6 +349,32 @@ def test_first_step_effect_matching_filters_blocked_forward_prior() -> None:
     assert selected.effect_trace == ("forward_move",)
 
 
+def test_semantic_intent_selection_ignores_trace_first_step_effect_filter() -> None:
+    query = _signature(
+        direction=0,
+        last_action=3,
+        local_shape=(0, 0, 1, 0, 1),
+    )
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    stale_trace_prior = BehaviorPrior(
+        kind="forward_run",
+        initiation=query,
+        action_trace=(2,),
+        termination=_signature(last_action=2),
+        score=0.95,
+        state_trace=(0, 1),
+        signature_trace=(query, _signature(last_action=2)),
+        effect_trace=("forward_blocked",),
+    )
+    library.add(stale_trace_prior)
+
+    default_selected = _select_prior_for_execution(library, query, "default", "first_step")
+    semantic_selected = _select_prior_for_execution(library, query, "semantic_intents", "first_step")
+
+    assert default_selected is None
+    assert semantic_selected is stale_trace_prior
+
+
 def test_target_reuse_extracts_navigation_prior_from_rollout() -> None:
     signatures = [
         _signature(last_action=3),
@@ -400,6 +451,97 @@ def test_run_episode_executes_matching_behavior_prior_before_agent_policy() -> N
     assert kind_stats.executed_prior_steps == 2
     assert kind_stats.completed_prior_count == 1
     assert kind_stats.aborted_prior_count == 0
+
+
+def test_semantic_forward_run_turns_away_from_blocked_front() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3, local_shape=(1, 1, 0, 1, 0)),
+        _signature(direction=1, last_action=1, local_shape=(0, 0, 1, 0, 1)),
+        _signature(direction=1, last_action=2, local_shape=(0, 0, 1, 0, 1)),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 0), (0, 0), (0, 1)])
+    agent = QAgent(4, 3, np.random.default_rng(11))
+    agent.q[:, 0] = 5.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=signatures[0],
+            action_trace=(2, 2),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(signatures),
+            effect_trace=("forward_move", "forward_move"),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(5),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        execution_mode="semantic_intents",
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        continuation_rule="kind_structural_guard",
+        structural_patience=1,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [1, 2]
+    assert execution_stats.completed_prior_count == 1
+    assert execution_stats.effect_abort_count == 0
+    assert execution_stats.kind_stats["forward_run"].structural_evidence_steps == 1
+
+
+def test_semantic_region_transition_moves_forward_when_front_is_open() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3, local_shape=(0, 1, 1, 1, 1)),
+        _signature(direction=0, last_action=2, local_shape=(0, 1, 1, 1, 1)),
+        _signature(direction=0, last_action=2, local_shape=(0, 1, 1, 1, 1)),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 3), (0, 4), (0, 5)])
+    agent = QAgent(4, 3, np.random.default_rng(11))
+    agent.q[:, 0] = 5.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="region_transition",
+            initiation=signatures[0],
+            action_trace=(0, 0),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(signatures),
+            effect_trace=("turn_left", "turn_left"),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(5),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        execution_mode="semantic_intents",
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        continuation_rule="kind_structural_guard",
+        structural_patience=1,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [2, 2]
+    assert execution_stats.completed_prior_count == 1
+    assert execution_stats.kind_stats["region_transition"].structural_evidence_steps == 2
 
 
 def test_run_episode_aborts_prior_when_signature_mismatches() -> None:

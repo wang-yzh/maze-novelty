@@ -72,3 +72,23 @@ def test_branch_specific_preset_selects_method_defaults() -> None:
     assert subgoal["continuation_rule"] == "progress_guard"
     assert subgoal["stall_tolerance"] == 1
     assert subgoal["structural_patience"] == 2
+
+
+def test_branch_specific_preset_allows_semantic_execution_override() -> None:
+    args = SimpleNamespace(
+        reuse_preset_mode="branch_specific",
+        reuse_probe_episodes=6,
+        reuse_abort_on_mismatch=True,
+        reuse_mismatch_tolerance=99,
+        reuse_reinforce_passes=4,
+        reuse_reward=0.075,
+        reuse_execution_mode="semantic_intents",
+    )
+
+    operate = _reuse_config_kwargs(args, "operate_replay_pretrain", "direction_agnostic")
+    motif = _reuse_config_kwargs(args, "cyclic_motif_fast_replay_pretrain", "direction_agnostic")
+    subgoal = _reuse_config_kwargs(args, "cyclic_subgoal_ecology_replay_pretrain", "direction_agnostic")
+
+    assert operate["execution_mode"] == "semantic_intents"
+    assert motif["execution_mode"] == "semantic_intents"
+    assert subgoal["execution_mode"] == "semantic_intents"

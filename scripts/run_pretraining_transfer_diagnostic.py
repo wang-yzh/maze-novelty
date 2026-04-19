@@ -118,6 +118,11 @@ def main() -> None:
     parser.add_argument("--include-target-reuse", action="store_true")
     parser.add_argument("--reuse-preset-mode", choices=["uniform", "branch_specific"], default="uniform")
     parser.add_argument("--reuse-match-modes", default="strict")
+    parser.add_argument(
+        "--reuse-execution-mode",
+        choices=["default", "motif_fragments", "semantic_intents"],
+        default="default",
+    )
     parser.add_argument("--reuse-effect-match-mode", choices=["none", "first_step"], default="none")
     parser.add_argument("--reuse-abort-on-mismatch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--reuse-mismatch-tolerance", type=int, default=0)
@@ -286,7 +291,7 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
         "continuation_rule": getattr(args, "reuse_continuation_rule", "signature"),
         "stall_tolerance": getattr(args, "reuse_stall_tolerance", 0),
         "structural_patience": getattr(args, "reuse_structural_patience", 2),
-        "execution_mode": "default",
+        "execution_mode": getattr(args, "reuse_execution_mode", "default"),
         "min_execution_support": 1,
         "allow_trace_priors": True,
         "reinforce_passes": args.reuse_reinforce_passes,
@@ -300,7 +305,7 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             **base,
             "abort_on_mismatch": False,
             "mismatch_tolerance": 0,
-            "execution_mode": "default",
+            "execution_mode": _branch_execution_mode(args, "default"),
             "effect_match_mode": "none",
             "min_execution_support": 1,
             "allow_trace_priors": True,
@@ -312,7 +317,7 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             **base,
             "abort_on_mismatch": True,
             "mismatch_tolerance": 1,
-            "execution_mode": "motif_fragments",
+            "execution_mode": _branch_execution_mode(args, "motif_fragments"),
             "effect_match_mode": "first_step",
             "min_execution_support": 2,
             "allow_trace_priors": False,
@@ -325,7 +330,7 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             **base,
             "abort_on_mismatch": True,
             "mismatch_tolerance": 1,
-            "execution_mode": "default",
+            "execution_mode": _branch_execution_mode(args, "default"),
             "effect_match_mode": "first_step",
             "min_execution_support": 1,
             "allow_trace_priors": True,
@@ -334,6 +339,11 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             "structural_patience": getattr(args, "reuse_structural_patience", 2),
         }
     return base
+
+
+def _branch_execution_mode(args: Any, default: str) -> str:
+    mode = getattr(args, "reuse_execution_mode", "default")
+    return default if mode == "default" else mode
 
 
 def _report_row(
