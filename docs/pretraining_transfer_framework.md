@@ -510,6 +510,78 @@ artifact transferability and target-side reuse are now the issue.
 
 The next experiment should not simply increase budget. It should add an intermediate target or a target-side artifact reuse diagnostic, because FourRooms -> MultiRoom is currently too sparse to distinguish transfer usefulness by final score.
 
+## Transfer Ladder Probe V1
+
+The diagnostic runner now supports target ladders:
+
+```text
+--target-envs MiniGrid-MultiRoom-N2-S4-v0,MiniGrid-MultiRoom-N4-S5-v0
+```
+
+It also reports target-side zero-shot behavior diagnostics before adaptation:
+
+```text
+target_probe_subgoal_score
+target_probe_region_transitions
+target_probe_new_regions
+target_probe_mobility
+target_probe_success
+```
+
+Command:
+
+```bash
+uv run python scripts/run_pretraining_transfer_diagnostic.py \
+  --seeds 7,17,27 \
+  --target-envs MiniGrid-MultiRoom-N2-S4-v0,MiniGrid-MultiRoom-N4-S5-v0 \
+  --pretrain-episodes 40 \
+  --adapt-episodes 30 \
+  --eval-every 10 \
+  --eval-episodes 4 \
+  --output outputs/pretraining_transfer_ladder_probe_v1.csv \
+  --summary-output outputs/pretraining_transfer_ladder_probe_v1_summary.csv
+```
+
+Final target success remains zero on both targets. The useful signal is in the target probe:
+
+| Target | Method | Target Probe Subgoal | Region Transitions | New Regions | Mobility |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `MultiRoom-N2-S4` | `simple_q_pretrain` | `0.0111` | `0.4167` | `1.3333` | `0.0062` |
+| `MultiRoom-N2-S4` | `operate_replay_pretrain` | `0.0224` | `2.2500` | `1.1667` | `0.0609` |
+| `MultiRoom-N2-S4` | `cyclic_motif_fast_replay_pretrain` | `0.0616` | `3.2500` | `1.5000` | `0.0534` |
+| `MultiRoom-N2-S4` | `cyclic_subgoal_ecology_replay_pretrain` | `0.0186` | `1.5000` | `1.0833` | `0.0583` |
+| `MultiRoom-N4-S5` | `simple_q_pretrain` | `0.0160` | `0.5833` | `1.2500` | `0.0173` |
+| `MultiRoom-N4-S5` | `operate_replay_pretrain` | `0.0230` | `1.8333` | `1.1667` | `0.0618` |
+| `MultiRoom-N4-S5` | `cyclic_motif_fast_replay_pretrain` | `0.0607` | `2.2500` | `1.5000` | `0.0371` |
+| `MultiRoom-N4-S5` | `cyclic_subgoal_ecology_replay_pretrain` | `0.0680` | `3.0000` | `1.6667` | `0.0654` |
+
+Interpretation:
+
+```text
+target success is still too sparse;
+target-side behavior is not identical across pretraining artifacts.
+```
+
+The ladder reveals a useful split:
+
+```text
+N2-S4:
+  motif-fast has the best target probe subgoal score and region transitions.
+
+N4-S5:
+  subgoal-ecology has the best target probe subgoal score,
+  most region transitions,
+  most new regions,
+  and highest mobility.
+```
+
+This is the first evidence in the transfer framework that artifact type affects target-side behavior before success appears. It is not yet proof of transfer performance, but it tells us the next coding target:
+
+```text
+target-side artifact reuse must become an adaptation mechanism,
+not just a diagnostic.
+```
+
 ## Decision Rule
 
 After the framework exists, new cycle variants should only be promoted when they improve at least one of:

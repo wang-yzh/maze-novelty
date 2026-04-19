@@ -11,14 +11,18 @@ from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".mplconfig"))
 os.environ.setdefault("XDG_CACHE_HOME", str(ROOT / ".cache"))
 os.environ.setdefault("MPLBACKEND", "Agg")
 
-from minigrid_adapter import MiniGridSpec
+from minigrid_adapter import MiniGridSpec, MiniGridTabularEnv
+from minigrid_diagnostics import summarize_rollouts
 from pretraining.minigrid_schedules import build_pretrain_artifact
+from pretraining.minigrid_schedules import run_minigrid_episode
 from transfer.evaluator import AdaptationConfig, evaluate_scratch, evaluate_transfer
 
 
@@ -44,6 +48,11 @@ SUMMARY_METRICS = [
     "artifact_active_niches",
     "artifact_subgoal_motif_count",
     "artifact_transition_motif_count",
+    "target_probe_subgoal_score",
+    "target_probe_region_transitions",
+    "target_probe_new_regions",
+    "target_probe_mobility",
+    "target_probe_success",
 ]
 
 
@@ -51,6 +60,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run a multi-seed pretraining transfer diagnostic.")
     parser.add_argument("--source-env", default="MiniGrid-FourRooms-v0")
     parser.add_argument("--target-env", default="MiniGrid-MultiRoom-N4-S5-v0")
+    parser.add_argument(
+        "--target-envs",
+        default="",
+        help="Optional comma-separated target ladder. Overrides --target-env when set.",
+    )
     parser.add_argument("--seeds", default="7,17,27")
     parser.add_argument("--max-steps", type=int, default=256)
     parser.add_argument("--state-encoder", choices=["compact", "geometry"], default="geometry")
@@ -72,23 +86,12 @@ def main() -> None:
 
     seeds = [int(seed.strip()) for seed in args.seeds.split(",") if seed.strip()]
     methods = [method.strip() for method in args.methods.split(",") if method.strip()]
+    target_envs = [env.strip() for env in args.target_envs.split(",") if env.strip()] or [args.target_env]
     rows: list[dict[str, Any]] = []
 
     for seed in seeds:
         source_spec = MiniGridSpec(args.source_env, args.max_steps, seed, args.state_encoder)
-        target_spec = MiniGridSpec(args.target_env, args.max_steps, seed, args.state_encoder)
-        config = AdaptationConfig(
-            episodes=args.adapt_episodes,
-            eval_every=args.eval_every,
-            eval_episodes=args.eval_episodes,
-            epsilon=args.adapt_epsilon,
-            threshold=args.threshold,
-        )
-        scratch_report, _scratch_points = evaluate_scratch(target_spec, seed + 1000, config)
-        scratch_row = _report_row(scratch_report, {}, seed)
-        rows.append(scratch_row)
-        print(_format_progress(scratch_row))
-
+        artifacts = []
         for idx, method in enumerate(methods):
             artifact = build_pretrain_artifact(
                 method,
@@ -97,16 +100,34 @@ def main() -> None:
                 args.pretrain_episodes,
                 args.pretrain_epsilon,
             )
-            report, _points = evaluate_transfer(
-                artifact,
-                target_spec,
-                seed + 3000 + idx * 100,
-                config,
-                scratch_final_score=scratch_report.final_score,
+            artifacts.append((idx, artifact))
+
+        for target_idx, target_env in enumerate(target_envs):
+            target_spec = MiniGridSpec(target_env, args.max_steps, seed, args.state_encoder)
+            config = AdaptationConfig(
+                episodes=args.adapt_episodes,
+                eval_every=args.eval_every,
+                eval_episodes=args.eval_episodes,
+                epsilon=args.adapt_epsilon,
+                threshold=args.threshold,
             )
-            row = _report_row(report, artifact.metadata, seed)
-            rows.append(row)
-            print(_format_progress(row))
+            scratch_report, _scratch_points = evaluate_scratch(target_spec, seed + 1000 + target_idx * 10000, config)
+            scratch_row = _report_row(scratch_report, {}, seed)
+            rows.append(scratch_row)
+            print(_format_progress(scratch_row))
+
+            for idx, artifact in artifacts:
+                report, _points = evaluate_transfer(
+                    artifact,
+                    target_spec,
+                    seed + 3000 + target_idx * 10000 + idx * 100,
+                    config,
+                    scratch_final_score=scratch_report.final_score,
+                )
+                probe = _target_probe(target_spec, artifact.best_agent(), seed + 5000 + target_idx * 10000 + idx * 100, args.eval_episodes)
+                row = _report_row(report, artifact.metadata, seed, probe)
+                rows.append(row)
+                print(_format_progress(row))
 
     summary_rows = _summary_rows(rows)
     _write_csv(args.output, rows)
@@ -115,7 +136,12 @@ def main() -> None:
     print(f"Wrote {args.summary_output}")
 
 
-def _report_row(report, metadata: dict[str, Any], experiment_seed: int) -> dict[str, Any]:
+def _report_row(
+    report,
+    metadata: dict[str, Any],
+    experiment_seed: int,
+    target_probe: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     row = asdict(report)
     row["experiment_seed"] = experiment_seed
     row["artifact_source_score"] = metadata.get("source_score", "")
@@ -126,16 +152,42 @@ def _report_row(report, metadata: dict[str, Any], experiment_seed: int) -> dict[
     row["artifact_active_niches"] = metadata.get("active_niches", "")
     row["artifact_subgoal_motif_count"] = metadata.get("subgoal_motif_count", "")
     row["artifact_transition_motif_count"] = metadata.get("transition_motif_count", "")
+    row["target_probe_subgoal_score"] = ""
+    row["target_probe_region_transitions"] = ""
+    row["target_probe_new_regions"] = ""
+    row["target_probe_mobility"] = ""
+    row["target_probe_success"] = ""
+    if target_probe is not None:
+        row.update(target_probe)
     row["artifact_metadata_json"] = json.dumps(metadata, sort_keys=True)
     return row
 
 
+def _target_probe(target_spec: MiniGridSpec, agent, seed: int, eval_episodes: int) -> dict[str, Any]:
+    rng = np.random.default_rng(seed)
+    env = MiniGridTabularEnv(target_spec)
+    rollouts = [
+        run_minigrid_episode(env, agent, rng, epsilon=0.0, train=False, episode_seed=seed + idx)
+        for idx in range(eval_episodes)
+    ]
+    env.close()
+    diagnostics = summarize_rollouts(rollouts, target_spec.max_steps)
+    return {
+        "target_probe_subgoal_score": diagnostics.avg_subgoal_score,
+        "target_probe_region_transitions": diagnostics.avg_region_transitions,
+        "target_probe_new_regions": diagnostics.avg_new_regions,
+        "target_probe_mobility": diagnostics.avg_mobility,
+        "target_probe_success": sum(rollout.success for rollout in rollouts) / max(1, len(rollouts)),
+    }
+
+
 def _summary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    methods = sorted({str(row["method"]) for row in rows})
+    groups = sorted({(str(row["target_env"]), str(row["method"])) for row in rows})
     output = []
-    for method in methods:
-        method_rows = [row for row in rows if row["method"] == method]
+    for target_env, method in groups:
+        method_rows = [row for row in rows if row["target_env"] == target_env and row["method"] == method]
         summary: dict[str, Any] = {
+            "target_env": target_env,
             "method": method,
             "runs": len(method_rows),
             "nonzero_final_count": sum(_float(row["final_score"]) > 0.0 for row in method_rows),
