@@ -446,6 +446,70 @@ That is exactly the distinction the pretraining frame is meant to expose:
 Did this method create inherited structure even before transfer success appears?
 ```
 
+## Transfer Diagnostic V1
+
+The first non-smoke diagnostic uses three seeds and keeps the budget small enough for local iteration:
+
+```bash
+uv run python scripts/run_pretraining_transfer_diagnostic.py \
+  --seeds 7,17,27 \
+  --pretrain-episodes 40 \
+  --adapt-episodes 30 \
+  --eval-every 10 \
+  --eval-episodes 4 \
+  --output outputs/pretraining_transfer_diagnostic_v1.csv \
+  --summary-output outputs/pretraining_transfer_diagnostic_v1_summary.csv
+```
+
+Source:
+
+```text
+MiniGrid-FourRooms-v0
+```
+
+Target:
+
+```text
+MiniGrid-MultiRoom-N4-S5-v0
+```
+
+Summary:
+
+| Method | Target Final | Target AUC | Source Score | Source Success | Replay Bank | Motifs | Active Niches | Subgoal Motifs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `scratch` | `0.0000` | `0.0000` | - | - | - | - | - | - |
+| `simple_q_pretrain` | `0.0000` | `0.0000` | `0.2553` | `0.1111` | - | - | - | - |
+| `operate_replay_pretrain` | `0.0000` | `0.0000` | `0.1263` | `0.0556` | `6.6667` | - | - | - |
+| `cyclic_motif_fast_replay_pretrain` | `0.0000` | `0.0000` | `0.2487` | `0.1667` | `0.0000` | `0.0000` | `20.0000` | - |
+| `cyclic_subgoal_ecology_replay_pretrain` | `0.0000` | `0.0000` | `0.1028` | `0.0556` | `1.0000` | `61.6667` | `15.3333` | `22.0000` |
+
+Interpretation:
+
+No method transfers to MultiRoom under this budget. This is a real negative result, not a failed run.
+
+The artifact layer is informative:
+
+```text
+cyclic_motif_fast_replay_pretrain:
+  learns some source behavior
+  produces active niches
+  still creates zero fast motifs
+
+cyclic_subgoal_ecology_replay_pretrain:
+  weaker source score
+  reliably creates many motifs
+  reliably creates subgoal transition motifs
+```
+
+This points to the next bottleneck:
+
+```text
+artifact creation is no longer the only issue;
+artifact transferability and target-side reuse are now the issue.
+```
+
+The next experiment should not simply increase budget. It should add an intermediate target or a target-side artifact reuse diagnostic, because FourRooms -> MultiRoom is currently too sparse to distinguish transfer usefulness by final score.
+
 ## Decision Rule
 
 After the framework exists, new cycle variants should only be promoted when they improve at least one of:
