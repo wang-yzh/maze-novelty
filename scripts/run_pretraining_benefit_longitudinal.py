@@ -1,0 +1,676 @@
+from __future__ import annotations
+# ruff: noqa: E402
+
+import argparse
+import csv
+import json
+import os
+import sys
+from dataclasses import asdict, replace
+from pathlib import Path
+from statistics import mean, pstdev
+from typing import Any
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".mplconfig"))
+os.environ.setdefault("XDG_CACHE_HOME", str(ROOT / ".cache"))
+os.environ.setdefault("MPLBACKEND", "Agg")
+
+from agents import QAgent
+from minigrid_adapter import MiniGridSpec, MiniGridTabularEnv
+from minigrid_diagnostics import summarize_rollouts
+from pretraining.artifacts import PretrainArtifact
+from pretraining.minigrid_schedules import build_pretrain_artifact, run_minigrid_episode
+from transfer.evaluator import (
+    AdaptationConfig,
+    TargetReuseConfig,
+    TargetReuseItem,
+    TargetReuseSummary,
+    build_target_reuse_items,
+    evaluate_scratch,
+    evaluate_transfer,
+    evaluate_transfer_with_reuse_items,
+)
+from transfer.metrics import AdaptationPoint, TransferReport
+
+
+DEFAULT_METHODS = (
+    "simple_q_pretrain,"
+    "operate_replay_pretrain,"
+    "cyclic_motif_fast_replay_pretrain,"
+    "cyclic_subgoal_ecology_replay_pretrain"
+)
+
+SUMMARY_METRICS = [
+    "zero_shot_score",
+    "adaptation_auc",
+    "scratch_adaptation_auc",
+    "adaptation_auc_lift",
+    "time_to_first_success",
+    "time_to_threshold",
+    "final_score",
+    "scratch_final_score",
+    "transfer_lift",
+    "artifact_source_score",
+    "artifact_source_success",
+    "artifact_train_successes",
+    "artifact_replay_bank_size",
+    "artifact_motif_count",
+    "artifact_active_niches",
+    "artifact_subgoal_motif_count",
+    "artifact_transition_motif_count",
+    "target_probe_subgoal_score",
+    "target_probe_region_transitions",
+    "target_probe_new_regions",
+    "target_probe_mobility",
+    "target_probe_success",
+    "target_reuse_item_count",
+    "target_reuse_matched_prior_count",
+    "target_reuse_executed_prior_count",
+    "target_reuse_completed_prior_count",
+    "target_reuse_aborted_prior_count",
+    "target_reuse_executed_episode_avg_subgoal_score",
+    "target_reuse_executed_episode_avg_region_transitions",
+    "target_reuse_executed_episode_avg_mobility",
+    "target_reuse_composition_region_change_count",
+    "target_reuse_composition_goal_visibility_gain_count",
+    "target_reuse_composition_avg_displacement",
+    "target_reuse_composition_avg_signature_progress_delta",
+]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run longitudinal checks for whether pretraining improves target adaptation.",
+    )
+    parser.add_argument("--source-env", default="MiniGrid-FourRooms-v0")
+    parser.add_argument(
+        "--target-envs",
+        default="MiniGrid-MultiRoom-N2-S4-v0,MiniGrid-MultiRoom-N4-S5-v0",
+    )
+    parser.add_argument("--seeds", default="7,17,27")
+    parser.add_argument("--max-steps", type=int, default=256)
+    parser.add_argument("--state-encoder", choices=["compact", "geometry"], default="geometry")
+    parser.add_argument("--pretrain-episodes", type=int, default=40)
+    parser.add_argument("--pretrain-epsilon", type=float, default=0.25)
+    parser.add_argument("--adapt-episodes", type=int, default=30)
+    parser.add_argument("--adapt-epsilon", type=float, default=0.18)
+    parser.add_argument("--eval-every", type=int, default=10)
+    parser.add_argument("--eval-episodes", type=int, default=4)
+    parser.add_argument("--threshold", type=float, default=0.10)
+    parser.add_argument("--methods", default=DEFAULT_METHODS)
+    parser.add_argument("--include-target-reuse", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--include-random-artifact-control", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--include-shuffled-prior-control", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--reuse-match-mode", default="direction_agnostic")
+    parser.add_argument(
+        "--reuse-execution-mode",
+        choices=["default", "motif_fragments", "semantic_intents"],
+        default="semantic_intents",
+    )
+    parser.add_argument("--reuse-effect-match-mode", choices=["none", "first_step"], default="first_step")
+    parser.add_argument("--reuse-abort-on-mismatch", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--reuse-mismatch-tolerance", type=int, default=1)
+    parser.add_argument(
+        "--reuse-continuation-rule",
+        choices=[
+            "signature",
+            "motif_consistency",
+            "effect_consistency",
+            "effect_structural_guard",
+            "kind_structural_guard",
+            "progress_guard",
+        ],
+        default="kind_structural_guard",
+    )
+    parser.add_argument("--reuse-stall-tolerance", type=int, default=0)
+    parser.add_argument("--reuse-structural-patience", type=int, default=4)
+    parser.add_argument("--reuse-probe-episodes", type=int, default=6)
+    parser.add_argument("--reuse-reinforce-passes", type=int, default=4)
+    parser.add_argument("--reuse-reward", type=float, default=0.075)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / "outputs" / "pretraining_benefit_longitudinal.csv",
+    )
+    parser.add_argument(
+        "--points-output",
+        type=Path,
+        default=ROOT / "outputs" / "pretraining_benefit_longitudinal_points.csv",
+    )
+    parser.add_argument(
+        "--summary-output",
+        type=Path,
+        default=ROOT / "outputs" / "pretraining_benefit_longitudinal_summary.csv",
+    )
+    args = parser.parse_args()
+
+    seeds = _int_list(args.seeds)
+    methods = _str_list(args.methods)
+    target_envs = _str_list(args.target_envs)
+    report_rows: list[dict[str, Any]] = []
+    point_rows: list[dict[str, Any]] = []
+
+    for seed in seeds:
+        source_spec = MiniGridSpec(args.source_env, args.max_steps, seed, args.state_encoder)
+        artifacts = [
+            build_pretrain_artifact(
+                method,
+                source_spec,
+                seed + 2000 + idx * 100,
+                args.pretrain_episodes,
+                args.pretrain_epsilon,
+            )
+            for idx, method in enumerate(methods)
+        ]
+        if args.include_random_artifact_control:
+            artifacts.insert(0, _random_artifact_control(source_spec, seed + 1500))
+
+        for target_idx, target_env in enumerate(target_envs):
+            target_spec = MiniGridSpec(target_env, args.max_steps, seed, args.state_encoder)
+            config = AdaptationConfig(
+                episodes=args.adapt_episodes,
+                eval_every=args.eval_every,
+                eval_episodes=args.eval_episodes,
+                epsilon=args.adapt_epsilon,
+                threshold=args.threshold,
+            )
+            scratch_report, scratch_points = evaluate_scratch(
+                target_spec,
+                seed + 1000 + target_idx * 10000,
+                config,
+            )
+            scratch_context = _scratch_context(scratch_report)
+            _append_result(
+                report_rows,
+                point_rows,
+                scratch_report,
+                scratch_points,
+                condition="scratch",
+                source_method="scratch",
+                experiment_seed=seed,
+                scratch_context=scratch_context,
+            )
+            print(_format_progress(report_rows[-1]))
+
+            for artifact_idx, artifact in enumerate(artifacts):
+                adapt_seed = seed + 3000 + target_idx * 10000 + artifact_idx * 100
+                report, points = evaluate_transfer(
+                    artifact,
+                    target_spec,
+                    adapt_seed,
+                    config,
+                    scratch_final_score=scratch_report.final_score,
+                )
+                probe = _target_probe(
+                    target_spec,
+                    artifact.best_agent(),
+                    seed + 5000 + target_idx * 10000 + artifact_idx * 100,
+                    args.eval_episodes,
+                )
+                _append_result(
+                    report_rows,
+                    point_rows,
+                    report,
+                    points,
+                    condition="pretrained_agent",
+                    source_method=artifact.method,
+                    experiment_seed=seed,
+                    scratch_context=scratch_context,
+                    metadata=artifact.metadata,
+                    target_probe=probe,
+                )
+                print(_format_progress(report_rows[-1]))
+
+                if not args.include_target_reuse:
+                    continue
+
+                reuse_config = _reuse_config(args)
+                reuse_items, reuse_summary = build_target_reuse_items(
+                    target_spec,
+                    artifact.best_agent(),
+                    seed + 7000 + target_idx * 10000 + artifact_idx * 100,
+                    reuse_config,
+                )
+                reuse_report, reuse_points, completed_summary = evaluate_transfer_with_reuse_items(
+                    artifact,
+                    target_spec,
+                    adapt_seed,
+                    config,
+                    reuse_config,
+                    reuse_items,
+                    reuse_summary,
+                    scratch_final_score=scratch_report.final_score,
+                )
+                _append_result(
+                    report_rows,
+                    point_rows,
+                    reuse_report,
+                    reuse_points,
+                    condition="target_reuse",
+                    source_method=artifact.method,
+                    experiment_seed=seed,
+                    scratch_context=scratch_context,
+                    metadata=artifact.metadata,
+                    target_probe=probe,
+                    target_reuse=_reuse_row(reuse_config, completed_summary, "true"),
+                )
+                print(_format_progress(report_rows[-1]))
+
+                if args.include_shuffled_prior_control:
+                    shuffled_items = _shuffle_reuse_items(
+                        reuse_items,
+                        np.random.default_rng(seed + 9000 + target_idx * 10000 + artifact_idx * 100),
+                    )
+                    shuffled_report, shuffled_points, shuffled_summary = evaluate_transfer_with_reuse_items(
+                        artifact,
+                        target_spec,
+                        adapt_seed,
+                        config,
+                        reuse_config,
+                        shuffled_items,
+                        replace(reuse_summary, item_kind_counts_json=_item_kind_counts_json(shuffled_items)),
+                        scratch_final_score=scratch_report.final_score,
+                    )
+                    shuffled_report = replace(
+                        shuffled_report,
+                        method=f"{artifact.method}+shuffled_target_reuse[{_reuse_label(reuse_config)}]",
+                    )
+                    _append_result(
+                        report_rows,
+                        point_rows,
+                        shuffled_report,
+                        shuffled_points,
+                        condition="shuffled_prior_control",
+                        source_method=artifact.method,
+                        experiment_seed=seed,
+                        scratch_context=scratch_context,
+                        metadata=artifact.metadata,
+                        target_probe=probe,
+                        target_reuse=_reuse_row(reuse_config, shuffled_summary, "shuffled"),
+                    )
+                    print(_format_progress(report_rows[-1]))
+
+    _write_csv(args.output, report_rows)
+    _write_csv(args.points_output, point_rows)
+    _write_csv(args.summary_output, _summary_rows(report_rows))
+    print(f"Wrote {args.output}")
+    print(f"Wrote {args.points_output}")
+    print(f"Wrote {args.summary_output}")
+
+
+def _random_artifact_control(spec: MiniGridSpec, seed: int) -> PretrainArtifact:
+    rng = np.random.default_rng(seed)
+    env = MiniGridTabularEnv(spec, episode_seed=seed)
+    agent = QAgent(env.n_states, env.n_actions, rng)
+    env.close()
+    return PretrainArtifact(
+        method="random_artifact_control",
+        source_env=spec.env_id,
+        seed=seed,
+        population=[agent.clone()],
+        hall_of_fame=[agent.clone()],
+        metadata={
+            "control": "random_artifact",
+            "pretrain_episodes": 0,
+            "source_score": 0.0,
+            "source_success": 0.0,
+        },
+    )
+
+
+def _reuse_config(args: Any) -> TargetReuseConfig:
+    return TargetReuseConfig(
+        probe_episodes=args.reuse_probe_episodes,
+        match_mode=args.reuse_match_mode,
+        execution_mode=args.reuse_execution_mode,
+        effect_match_mode=args.reuse_effect_match_mode,
+        abort_on_mismatch=args.reuse_abort_on_mismatch,
+        mismatch_tolerance=args.reuse_mismatch_tolerance,
+        continuation_rule=args.reuse_continuation_rule,
+        stall_tolerance=args.reuse_stall_tolerance,
+        structural_patience=args.reuse_structural_patience,
+        reinforce_passes=args.reuse_reinforce_passes,
+        reward=args.reuse_reward,
+    )
+
+
+def _append_result(
+    report_rows: list[dict[str, Any]],
+    point_rows: list[dict[str, Any]],
+    report: TransferReport,
+    points: list[AdaptationPoint],
+    *,
+    condition: str,
+    source_method: str,
+    experiment_seed: int,
+    scratch_context: dict[str, Any],
+    metadata: dict[str, Any] | None = None,
+    target_probe: dict[str, Any] | None = None,
+    target_reuse: dict[str, Any] | None = None,
+) -> None:
+    row = _report_row(
+        report,
+        metadata or {},
+        experiment_seed,
+        condition,
+        source_method,
+        scratch_context,
+        target_probe,
+        target_reuse,
+    )
+    report_rows.append(row)
+    for point in points:
+        point_rows.append(_point_row(row, point))
+
+
+def _report_row(
+    report: TransferReport,
+    metadata: dict[str, Any],
+    experiment_seed: int,
+    condition: str,
+    source_method: str,
+    scratch_context: dict[str, Any],
+    target_probe: dict[str, Any] | None = None,
+    target_reuse: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    row = asdict(report)
+    row["condition"] = condition
+    row["source_method"] = source_method
+    row["experiment_seed"] = experiment_seed
+    row["scratch_final_score"] = scratch_context["scratch_final_score"]
+    row["scratch_adaptation_auc"] = scratch_context["scratch_adaptation_auc"]
+    row["scratch_time_to_first_success"] = scratch_context["scratch_time_to_first_success"]
+    row["adaptation_auc_lift"] = row["adaptation_auc"] - scratch_context["scratch_adaptation_auc"]
+    row["time_to_first_success_delta"] = _time_delta(
+        row["time_to_first_success"],
+        scratch_context["scratch_time_to_first_success"],
+    )
+    row.update(_artifact_metadata_row(metadata))
+    row.update(_blank_probe_row())
+    row.update(_blank_reuse_row())
+    if target_probe is not None:
+        row.update(target_probe)
+    if target_reuse is not None:
+        row.update(target_reuse)
+    row["artifact_metadata_json"] = json.dumps(metadata, sort_keys=True)
+    return row
+
+
+def _artifact_metadata_row(metadata: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "artifact_source_score": metadata.get("source_score", ""),
+        "artifact_source_success": metadata.get("source_success", ""),
+        "artifact_train_successes": metadata.get("train_successes", ""),
+        "artifact_replay_bank_size": metadata.get("replay_bank_size", ""),
+        "artifact_motif_count": metadata.get("motif_count", ""),
+        "artifact_active_niches": metadata.get("active_niches", ""),
+        "artifact_subgoal_motif_count": metadata.get("subgoal_motif_count", ""),
+        "artifact_transition_motif_count": metadata.get("transition_motif_count", ""),
+    }
+
+
+def _blank_probe_row() -> dict[str, Any]:
+    return {
+        "target_probe_subgoal_score": "",
+        "target_probe_region_transitions": "",
+        "target_probe_new_regions": "",
+        "target_probe_mobility": "",
+        "target_probe_success": "",
+    }
+
+
+def _blank_reuse_row() -> dict[str, Any]:
+    return {
+        "target_reuse_control": "",
+        "target_reuse_match_mode": "",
+        "target_reuse_execution_mode": "",
+        "target_reuse_effect_match_mode": "",
+        "target_reuse_abort_on_mismatch": "",
+        "target_reuse_mismatch_tolerance": "",
+        "target_reuse_continuation_rule": "",
+        "target_reuse_structural_patience": "",
+        "target_reuse_item_count": "",
+        "target_reuse_item_kind_counts_json": "",
+        "target_reuse_prior_kind_stats_json": "",
+        "target_reuse_matched_prior_count": "",
+        "target_reuse_executed_prior_count": "",
+        "target_reuse_completed_prior_count": "",
+        "target_reuse_aborted_prior_count": "",
+        "target_reuse_executed_episode_avg_subgoal_score": "",
+        "target_reuse_executed_episode_avg_region_transitions": "",
+        "target_reuse_executed_episode_avg_mobility": "",
+        "target_reuse_composition_region_change_count": "",
+        "target_reuse_composition_goal_visibility_gain_count": "",
+        "target_reuse_composition_avg_displacement": "",
+        "target_reuse_composition_avg_signature_progress_delta": "",
+    }
+
+
+def _reuse_row(
+    config: TargetReuseConfig,
+    summary: TargetReuseSummary,
+    control: str,
+) -> dict[str, Any]:
+    return {
+        "target_reuse_control": control,
+        "target_reuse_match_mode": config.match_mode,
+        "target_reuse_execution_mode": config.execution_mode,
+        "target_reuse_effect_match_mode": config.effect_match_mode,
+        "target_reuse_abort_on_mismatch": config.abort_on_mismatch,
+        "target_reuse_mismatch_tolerance": config.mismatch_tolerance,
+        "target_reuse_continuation_rule": config.continuation_rule,
+        "target_reuse_structural_patience": config.structural_patience,
+        "target_reuse_item_count": summary.item_count,
+        "target_reuse_item_kind_counts_json": summary.item_kind_counts_json,
+        "target_reuse_prior_kind_stats_json": summary.prior_kind_stats_json,
+        "target_reuse_matched_prior_count": summary.matched_prior_count,
+        "target_reuse_executed_prior_count": summary.executed_prior_count,
+        "target_reuse_completed_prior_count": summary.completed_prior_count,
+        "target_reuse_aborted_prior_count": summary.aborted_prior_count,
+        "target_reuse_executed_episode_avg_subgoal_score": summary.executed_episode_avg_subgoal_score,
+        "target_reuse_executed_episode_avg_region_transitions": summary.executed_episode_avg_region_transitions,
+        "target_reuse_executed_episode_avg_mobility": summary.executed_episode_avg_mobility,
+        "target_reuse_composition_region_change_count": summary.composition_region_change_count,
+        "target_reuse_composition_goal_visibility_gain_count": summary.composition_goal_visibility_gain_count,
+        "target_reuse_composition_avg_displacement": summary.composition_avg_displacement,
+        "target_reuse_composition_avg_signature_progress_delta": summary.composition_avg_signature_progress_delta,
+    }
+
+
+def _point_row(report_row: dict[str, Any], point: AdaptationPoint) -> dict[str, Any]:
+    return {
+        "experiment_seed": report_row["experiment_seed"],
+        "condition": report_row["condition"],
+        "method": report_row["method"],
+        "source_method": report_row["source_method"],
+        "source_env": report_row["source_env"],
+        "target_env": report_row["target_env"],
+        "eval_step": point.step,
+        "success_rate": point.success_rate,
+        "avg_steps": point.avg_steps,
+        "score": point.score,
+    }
+
+
+def _target_probe(target_spec: MiniGridSpec, agent: QAgent, seed: int, eval_episodes: int) -> dict[str, Any]:
+    rng = np.random.default_rng(seed)
+    env = MiniGridTabularEnv(target_spec)
+    rollouts = [
+        run_minigrid_episode(env, agent, rng, epsilon=0.0, train=False, episode_seed=seed + idx)
+        for idx in range(eval_episodes)
+    ]
+    env.close()
+    diagnostics = summarize_rollouts(rollouts, target_spec.max_steps)
+    return {
+        "target_probe_subgoal_score": diagnostics.avg_subgoal_score,
+        "target_probe_region_transitions": diagnostics.avg_region_transitions,
+        "target_probe_new_regions": diagnostics.avg_new_regions,
+        "target_probe_mobility": diagnostics.avg_mobility,
+        "target_probe_success": sum(rollout.success for rollout in rollouts) / max(1, len(rollouts)),
+    }
+
+
+def _shuffle_reuse_items(
+    items: list[TargetReuseItem],
+    rng: np.random.Generator,
+) -> list[TargetReuseItem]:
+    if not items:
+        return []
+    donor_indices = _deranged_indices(len(items), rng)
+    shuffled = []
+    for idx, donor_idx in enumerate(donor_indices):
+        receiver = items[idx].prior
+        donor = items[donor_idx].prior
+        action_trace = donor.action_trace
+        if donor_idx == idx:
+            action_trace = _rotated_trace(action_trace)
+        signature_trace = ()
+        if donor.signature_trace:
+            signature_trace = (receiver.initiation, *donor.signature_trace[1:])
+        shuffled.append(
+            TargetReuseItem(
+                replace(
+                    receiver,
+                    kind=donor.kind,
+                    action_trace=action_trace,
+                    termination=donor.termination,
+                    state_trace=donor.state_trace,
+                    signature_trace=signature_trace,
+                    effect_trace=donor.effect_trace,
+                    source=f"{receiver.source}|shuffled_control",
+                )
+            )
+        )
+    return shuffled
+
+
+def _deranged_indices(count: int, rng: np.random.Generator) -> list[int]:
+    if count <= 1:
+        return [0] * count
+    indices = list(range(count))
+    for _ in range(8):
+        permuted = list(rng.permutation(count))
+        if all(left != right for left, right in zip(indices, permuted, strict=True)):
+            return permuted
+    return indices[1:] + indices[:1]
+
+
+def _rotated_trace(trace: tuple[int, ...]) -> tuple[int, ...]:
+    if len(trace) <= 1:
+        return trace
+    return (*trace[1:], trace[0])
+
+
+def _item_kind_counts_json(items: list[TargetReuseItem]) -> str:
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item.prior.kind] = counts.get(item.prior.kind, 0) + 1
+    return json.dumps(counts, sort_keys=True, separators=(",", ":"))
+
+
+def _scratch_context(report: TransferReport) -> dict[str, Any]:
+    return {
+        "scratch_final_score": report.final_score,
+        "scratch_adaptation_auc": report.adaptation_auc,
+        "scratch_time_to_first_success": report.time_to_first_success,
+    }
+
+
+def _time_delta(time_to_success: int, scratch_time_to_success: int) -> int | str:
+    if time_to_success < 0 or scratch_time_to_success < 0:
+        return ""
+    return time_to_success - scratch_time_to_success
+
+
+def _reuse_label(config: TargetReuseConfig) -> str:
+    mode = "open_loop" if not config.abort_on_mismatch else f"abort_t{config.mismatch_tolerance}"
+    parts = [config.match_mode, mode, config.execution_mode]
+    if config.continuation_rule != "signature":
+        parts.append(f"continue_{config.continuation_rule}")
+    if config.effect_match_mode != "none":
+        parts.append(f"effect_{config.effect_match_mode}")
+    return "|".join(parts)
+
+
+def _summary_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups = sorted({(str(row["target_env"]), str(row["condition"]), str(row["source_method"])) for row in rows})
+    output = []
+    for target_env, condition, source_method in groups:
+        method_rows = [
+            row
+            for row in rows
+            if row["target_env"] == target_env
+            and row["condition"] == condition
+            and row["source_method"] == source_method
+        ]
+        summary: dict[str, Any] = {
+            "target_env": target_env,
+            "condition": condition,
+            "source_method": source_method,
+            "runs": len(method_rows),
+            "nonzero_final_count": sum(_float(row["final_score"]) > 0.0 for row in method_rows),
+            "positive_final_lift_count": sum(_float(row["transfer_lift"]) > 0.0 for row in method_rows),
+            "positive_auc_lift_count": sum(_float(row["adaptation_auc_lift"]) > 0.0 for row in method_rows),
+            "negative_transfer_count": sum(str(row["negative_transfer"]) == "True" for row in method_rows),
+        }
+        for metric in SUMMARY_METRICS:
+            values = [_float(row.get(metric, "")) for row in method_rows if row.get(metric, "") != ""]
+            summary[f"{metric}_mean"] = mean(values) if values else ""
+            summary[f"{metric}_std"] = pstdev(values) if len(values) > 1 else 0.0 if values else ""
+        output.append(summary)
+    return output
+
+
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not rows:
+        return
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=_fieldnames(rows))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _fieldnames(rows: list[dict[str, Any]]) -> list[str]:
+    ordered = list(rows[0].keys())
+    for row in rows[1:]:
+        for key in row:
+            if key not in ordered:
+                ordered.append(key)
+    return ordered
+
+
+def _float(value: object) -> float:
+    if not isinstance(value, int | float | str):
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _int_list(raw: str) -> list[int]:
+    return [int(item.strip()) for item in raw.split(",") if item.strip()]
+
+
+def _str_list(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _format_progress(row: dict[str, Any]) -> str:
+    return (
+        f"seed={row['experiment_seed']} {row['target_env']} "
+        f"{row['condition']}:{row['source_method']} "
+        f"final={_float(row['final_score']):.4f} "
+        f"auc={_float(row['adaptation_auc']):.4f} "
+        f"auc_lift={_float(row['adaptation_auc_lift']):.4f} "
+        f"lift={_float(row['transfer_lift']):.4f}"
+    )
+
+
+if __name__ == "__main__":
+    main()

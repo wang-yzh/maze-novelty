@@ -527,6 +527,39 @@ The bottleneck has moved from execution to composition. Semantic priors can
 move through structure, but they are not yet target-directed enough to create
 solved episodes.
 
+### Untagged: `pretraining benefit longitudinal`
+
+Added:
+
+- a dedicated longitudinal benefit validation script;
+- report, summary, and per-eval-step point outputs;
+- random artifact control;
+- shuffled prior control;
+- paired adaptation seeds across no-reuse, true-reuse, and shuffled-reuse
+  conditions;
+- a reusable evaluator helper for externally supplied target reuse items.
+
+Result:
+
+The hard-target smoke still showed no task-level pretraining benefit:
+
+```text
+final_score = 0
+adaptation_auc = 0
+adaptation_auc_lift = 0
+```
+
+The same-source calibration produced a stronger warning: random artifact plus
+target reuse can create transient AUC while the tested pretrained methods do
+not. This means target-side reuse benefits cannot automatically be attributed
+to pretraining.
+
+Lesson:
+
+The validation standard is now stricter: a claimed pretraining benefit must beat
+scratch, random artifact control, and shuffled prior control across multiple
+seeds.
+
 ## Current State
 
 Current branch:

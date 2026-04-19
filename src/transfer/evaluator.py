@@ -290,6 +290,29 @@ def evaluate_transfer_with_target_reuse(
 ) -> tuple[TransferReport, list[AdaptationPoint], TargetReuseSummary]:
     agent = artifact.best_agent()
     reuse_items, reuse_summary = build_target_reuse_items(target_spec, agent, seed + 7000, reuse_config)
+    return evaluate_transfer_with_reuse_items(
+        artifact,
+        target_spec,
+        seed,
+        config,
+        reuse_config,
+        reuse_items,
+        reuse_summary,
+        scratch_final_score=scratch_final_score,
+    )
+
+
+def evaluate_transfer_with_reuse_items(
+    artifact: PretrainArtifact,
+    target_spec: MiniGridSpec,
+    seed: int,
+    config: AdaptationConfig,
+    reuse_config: TargetReuseConfig,
+    reuse_items: list[TargetReuseItem],
+    reuse_summary: TargetReuseSummary,
+    scratch_final_score: float = 0.0,
+) -> tuple[TransferReport, list[AdaptationPoint], TargetReuseSummary]:
+    agent = artifact.best_agent()
     points, execution_stats = adapt_agent(
         target_spec,
         agent,
