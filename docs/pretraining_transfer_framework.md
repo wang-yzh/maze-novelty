@@ -287,6 +287,22 @@ cyclic_subgoal_ecology_replay
 ecology variants
 ```
 
+The next two adapters were added:
+
+```text
+cyclic_motif_fast_replay_pretrain
+cyclic_subgoal_ecology_replay_pretrain
+```
+
+They intentionally preserve different hypotheses:
+
+| Method | Pretraining Hypothesis |
+| --- | --- |
+| `cyclic_motif_fast_replay_pretrain` | fast successful fragments are the best inherited structure |
+| `cyclic_subgoal_ecology_replay_pretrain` | high-progress failures can become useful inherited structure when true success is sparse |
+
+This distinction matters for hard domains. If success is common, fast replay may dominate. If success is rare, subgoal ecology should at least avoid an empty memory bank.
+
 ## First Smoke Test
 
 Recommended source:
@@ -371,6 +387,64 @@ Result:
 Interpretation:
 
 This still does not demonstrate transfer. It does demonstrate that multiple pretraining schedules can now be evaluated by the same report object and CSV output. That is the required foundation before we compare cycle designs instead of maze-specific final scores.
+
+## Expanded Adapter Smoke Test
+
+Command:
+
+```bash
+uv run python scripts/run_pretraining_transfer_smoke.py \
+  --source-env MiniGrid-FourRooms-v0 \
+  --target-env MiniGrid-MultiRoom-N4-S5-v0 \
+  --seed 7 \
+  --state-encoder geometry \
+  --pretrain-episodes 16 \
+  --adapt-episodes 12 \
+  --eval-every 6 \
+  --eval-episodes 2 \
+  --output outputs/pretraining_transfer_smoke_v2.csv
+```
+
+Result:
+
+| Method | Zero-Shot | Adaptation AUC | First Success | Final Score | Transfer Lift |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `scratch` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+| `simple_q_pretrain` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+| `operate_replay_pretrain` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+| `cyclic_motif_fast_replay_pretrain` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+| `cyclic_subgoal_ecology_replay_pretrain` | `0.0000` | `0.0000` | `-1` | `0.0000` | `0.0000` |
+
+Interpretation:
+
+This smoke is not a performance claim. It confirms that four pretraining methods can now export artifacts and enter the same transfer evaluation.
+
+The runner now also writes artifact diagnostics into the CSV:
+
+```text
+artifact_source_score
+artifact_source_success
+artifact_train_successes
+artifact_replay_bank_size
+artifact_motif_count
+artifact_active_niches
+artifact_subgoal_motif_count
+artifact_transition_motif_count
+artifact_metadata_json
+```
+
+This matters because target success is still too sparse. Without artifact diagnostics, every method looks identical. With diagnostics, we can distinguish:
+
+| Method | Artifact Signal In v2 Smoke |
+| --- | --- |
+| `cyclic_motif_fast_replay_pretrain` | nonzero source success, but empty fast motif bank under this tiny budget |
+| `cyclic_subgoal_ecology_replay_pretrain` | zero source success, but nonempty subgoal/transition memory |
+
+That is exactly the distinction the pretraining frame is meant to expose:
+
+```text
+Did this method create inherited structure even before transfer success appears?
+```
 
 ## Decision Rule
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import sys
 from dataclasses import asdict
@@ -30,7 +31,12 @@ def main() -> None:
     parser.add_argument("--pretrain-epsilon", type=float, default=0.25)
     parser.add_argument(
         "--pretrain-methods",
-        default="simple_q_pretrain,operate_replay_pretrain",
+        default=(
+            "simple_q_pretrain,"
+            "operate_replay_pretrain,"
+            "cyclic_motif_fast_replay_pretrain,"
+            "cyclic_subgoal_ecology_replay_pretrain"
+        ),
         help="Comma-separated pretraining methods to compare.",
     )
     parser.add_argument("--adapt-episodes", type=int, default=60)
@@ -53,7 +59,7 @@ def main() -> None:
 
     scratch_report, _scratch_points = evaluate_scratch(target_spec, args.seed + 1000, config)
     methods = [method.strip() for method in args.pretrain_methods.split(",") if method.strip()]
-    reports = []
+    report_rows = []
     for idx, method in enumerate(methods):
         artifact = build_pretrain_artifact(
             method,
@@ -69,12 +75,12 @@ def main() -> None:
             config,
             scratch_final_score=scratch_report.final_score,
         )
-        reports.append(report)
+        report_rows.append(_report_row(report, artifact.metadata))
 
-    rows = [asdict(scratch_report), *[asdict(report) for report in reports]]
+    rows = [_report_row(scratch_report, {}), *report_rows]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+        writer = csv.DictWriter(handle, fieldnames=_fieldnames(rows))
         writer.writeheader()
         writer.writerows(rows)
 
@@ -95,6 +101,29 @@ def main() -> None:
             row["negative_transfer"],
         )
     print(f"Wrote {args.output}")
+
+
+def _report_row(report, metadata: dict) -> dict:
+    row = asdict(report)
+    row["artifact_source_score"] = metadata.get("source_score", "")
+    row["artifact_source_success"] = metadata.get("source_success", "")
+    row["artifact_train_successes"] = metadata.get("train_successes", "")
+    row["artifact_replay_bank_size"] = metadata.get("replay_bank_size", "")
+    row["artifact_motif_count"] = metadata.get("motif_count", "")
+    row["artifact_active_niches"] = metadata.get("active_niches", "")
+    row["artifact_subgoal_motif_count"] = metadata.get("subgoal_motif_count", "")
+    row["artifact_transition_motif_count"] = metadata.get("transition_motif_count", "")
+    row["artifact_metadata_json"] = json.dumps(metadata, sort_keys=True)
+    return row
+
+
+def _fieldnames(rows: list[dict]) -> list[str]:
+    ordered = list(rows[0].keys())
+    for row in rows[1:]:
+        for key in row:
+            if key not in ordered:
+                ordered.append(key)
+    return ordered
 
 
 if __name__ == "__main__":
