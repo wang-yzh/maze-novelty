@@ -63,6 +63,8 @@ SUMMARY_METRICS = [
     "target_reuse_matched_prior_count",
     "target_reuse_executed_prior_count",
     "target_reuse_executed_prior_steps",
+    "target_reuse_mismatched_prior_steps",
+    "target_reuse_stalled_prior_steps",
     "target_reuse_aborted_prior_count",
     "target_reuse_aborted_prior_steps",
     "target_reuse_mismatch_tolerance",
@@ -103,6 +105,12 @@ def main() -> None:
     parser.add_argument("--reuse-match-modes", default="strict")
     parser.add_argument("--reuse-abort-on-mismatch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--reuse-mismatch-tolerance", type=int, default=0)
+    parser.add_argument(
+        "--reuse-continuation-rule",
+        choices=["signature", "motif_consistency", "progress_guard"],
+        default="signature",
+    )
+    parser.add_argument("--reuse-stall-tolerance", type=int, default=0)
     parser.add_argument("--reuse-probe-episodes", type=int, default=6)
     parser.add_argument("--reuse-reinforce-passes", type=int, default=4)
     parser.add_argument("--reuse-reward", type=float, default=0.075)
@@ -186,8 +194,10 @@ def main() -> None:
                             {
                                 "target_reuse_preset_mode": args.reuse_preset_mode,
                                 "target_reuse_match_mode": reuse_match_mode,
-                                "target_reuse_abort_on_mismatch": args.reuse_abort_on_mismatch,
-                                "target_reuse_mismatch_tolerance": args.reuse_mismatch_tolerance,
+                                "target_reuse_abort_on_mismatch": reuse_config.abort_on_mismatch,
+                                "target_reuse_mismatch_tolerance": reuse_config.mismatch_tolerance,
+                                "target_reuse_continuation_rule": reuse_config.continuation_rule,
+                                "target_reuse_stall_tolerance": reuse_config.stall_tolerance,
                                 "target_reuse_item_count": reuse_summary.item_count,
                                 "target_reuse_avg_item_score": reuse_summary.avg_item_score,
                                 "target_reuse_best_item_score": reuse_summary.best_item_score,
@@ -199,6 +209,8 @@ def main() -> None:
                                 "target_reuse_matched_prior_count": reuse_summary.matched_prior_count,
                                 "target_reuse_executed_prior_count": reuse_summary.executed_prior_count,
                                 "target_reuse_executed_prior_steps": reuse_summary.executed_prior_steps,
+                                "target_reuse_mismatched_prior_steps": reuse_summary.mismatched_prior_steps,
+                                "target_reuse_stalled_prior_steps": reuse_summary.stalled_prior_steps,
                                 "target_reuse_aborted_prior_count": reuse_summary.aborted_prior_count,
                                 "target_reuse_aborted_prior_steps": reuse_summary.aborted_prior_steps,
                                 "target_reuse_executed_episode_count": reuse_summary.executed_episode_count,
@@ -228,6 +240,8 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
         "match_mode": reuse_match_mode,
         "abort_on_mismatch": args.reuse_abort_on_mismatch,
         "mismatch_tolerance": args.reuse_mismatch_tolerance,
+        "continuation_rule": getattr(args, "reuse_continuation_rule", "signature"),
+        "stall_tolerance": getattr(args, "reuse_stall_tolerance", 0),
         "execution_mode": "default",
         "min_execution_support": 1,
         "allow_trace_priors": True,
@@ -245,6 +259,8 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             "execution_mode": "default",
             "min_execution_support": 1,
             "allow_trace_priors": True,
+            "continuation_rule": "signature",
+            "stall_tolerance": 0,
         }
     if method == "cyclic_motif_fast_replay_pretrain":
         return {
@@ -254,6 +270,8 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             "execution_mode": "motif_fragments",
             "min_execution_support": 2,
             "allow_trace_priors": False,
+            "continuation_rule": "motif_consistency",
+            "stall_tolerance": 0,
         }
     if method == "cyclic_subgoal_ecology_replay_pretrain":
         return {
@@ -263,6 +281,8 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             "execution_mode": "default",
             "min_execution_support": 1,
             "allow_trace_priors": True,
+            "continuation_rule": "progress_guard",
+            "stall_tolerance": 1,
         }
     return base
 
@@ -293,6 +313,8 @@ def _report_row(
     row["target_reuse_match_mode"] = ""
     row["target_reuse_abort_on_mismatch"] = ""
     row["target_reuse_mismatch_tolerance"] = ""
+    row["target_reuse_continuation_rule"] = ""
+    row["target_reuse_stall_tolerance"] = ""
     row["target_reuse_item_count"] = ""
     row["target_reuse_avg_item_score"] = ""
     row["target_reuse_best_item_score"] = ""
@@ -304,6 +326,8 @@ def _report_row(
     row["target_reuse_matched_prior_count"] = ""
     row["target_reuse_executed_prior_count"] = ""
     row["target_reuse_executed_prior_steps"] = ""
+    row["target_reuse_mismatched_prior_steps"] = ""
+    row["target_reuse_stalled_prior_steps"] = ""
     row["target_reuse_aborted_prior_count"] = ""
     row["target_reuse_aborted_prior_steps"] = ""
     row["target_reuse_executed_episode_count"] = ""

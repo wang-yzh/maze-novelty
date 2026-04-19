@@ -460,6 +460,149 @@ def test_run_episode_aborts_after_consecutive_mismatches_exceed_tolerance() -> N
     assert execution_stats.aborted_prior_steps == 1
 
 
+def test_motif_consistency_continuation_aborts_when_prior_stalls() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=1, last_action=2),
+        _signature(direction=1, last_action=1),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 0), (0, 0), (0, 1)])
+    agent = QAgent(4, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=signatures[0],
+            action_trace=(2, 1),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(signatures),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        continuation_rule="motif_consistency",
+        stall_tolerance=0,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [2, 0]
+    assert execution_stats.executed_prior_count == 1
+    assert execution_stats.executed_prior_steps == 1
+    assert execution_stats.stalled_prior_steps == 1
+    assert execution_stats.aborted_prior_count == 1
+    assert execution_stats.aborted_prior_steps == 1
+
+
+def test_motif_consistency_does_not_treat_turning_in_place_as_stall() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=1, last_action=1),
+        _signature(direction=1, last_action=2),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 0), (0, 0), (0, 1)])
+    agent = QAgent(4, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="wall_follow_right",
+            initiation=signatures[0],
+            action_trace=(1, 2),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(signatures),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        continuation_rule="motif_consistency",
+        stall_tolerance=0,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [1, 2]
+    assert execution_stats.executed_prior_steps == 2
+    assert execution_stats.stalled_prior_steps == 0
+    assert execution_stats.aborted_prior_count == 0
+
+
+def test_progress_guard_continuation_tolerates_mismatch_while_progress_evidence_remains() -> None:
+    prior_signatures = [
+        _signature(direction=0, last_action=3, topology=2),
+        _signature(direction=0, last_action=1, topology=2),
+        _signature(direction=0, last_action=2, topology=2),
+        _signature(direction=0, last_action=0, topology=2),
+    ]
+    env_signatures = [
+        prior_signatures[0],
+        _signature(direction=0, last_action=1, topology=3),
+        _signature(direction=0, last_action=2, topology=3),
+        _signature(direction=0, last_action=0, topology=3),
+    ]
+    env = _DummyEnv(env_signatures)
+    agent = QAgent(5, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    library.add(
+        BehaviorPrior(
+            kind="region_transition",
+            initiation=prior_signatures[0],
+            action_trace=(1, 2, 2),
+            termination=prior_signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2, 3),
+            signature_trace=tuple(prior_signatures),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=3,
+        abort_on_mismatch=True,
+        mismatch_tolerance=0,
+        continuation_rule="progress_guard",
+        stall_tolerance=0,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:3] == [1, 2, 2]
+    assert execution_stats.executed_prior_count == 1
+    assert execution_stats.executed_prior_steps == 3
+    assert execution_stats.mismatched_prior_steps == 3
+    assert execution_stats.aborted_prior_count == 0
+
+
 def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> None:
     aggregate = PriorExecutionStats()
     executed_episode = PriorExecutionStats(matched_prior_count=3, executed_prior_count=1, executed_prior_steps=2)
@@ -516,22 +659,27 @@ def _signature(
 
 
 class _DummyEnv:
-    def __init__(self, signatures: list[StateSignature]) -> None:
+    def __init__(
+        self,
+        signatures: list[StateSignature],
+        positions: list[tuple[int, int]] | None = None,
+    ) -> None:
         self._signatures = signatures
+        self._positions = positions or [(0, index) for index in range(len(signatures))]
         self.n_actions = 3
         self._index = 0
-        self.position = (0, 0)
+        self.position = self._positions[0]
         self.state_signature = signatures[0]
 
     def reset(self) -> int:
         self._index = 0
-        self.position = (0, 0)
+        self.position = self._positions[0]
         self.state_signature = self._signatures[0]
         return 0
 
     def step(self, action: int) -> tuple[int, float, bool, dict]:
         self._index += 1
-        self.position = (0, self._index)
+        self.position = self._positions[self._index]
         self.state_signature = self._signatures[self._index]
         done = self._index >= len(self._signatures) - 1
         return (
