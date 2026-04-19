@@ -13,6 +13,7 @@ from agents import QAgent, Rollout
 from core.behavior import BehaviorLibrary, BehaviorPrior
 from minigrid_encoders import DIRECTION_AGNOSTIC_MATCH, StateSignature
 from transfer.evaluator import (
+    PriorKindStats,
     PriorExecutionStats,
     TargetReuseConfig,
     TargetReuseItem,
@@ -393,6 +394,12 @@ def test_run_episode_executes_matching_behavior_prior_before_agent_policy() -> N
     assert execution_stats.executed_prior_steps == 2
     assert execution_stats.completed_prior_count == 1
     assert execution_stats.aborted_prior_count == 0
+    kind_stats = execution_stats.kind_stats["wall_follow_right"]
+    assert kind_stats.matched_prior_count >= 1
+    assert kind_stats.executed_prior_count == 1
+    assert kind_stats.executed_prior_steps == 2
+    assert kind_stats.completed_prior_count == 1
+    assert kind_stats.aborted_prior_count == 0
 
 
 def test_run_episode_aborts_prior_when_signature_mismatches() -> None:
@@ -447,6 +454,13 @@ def test_run_episode_aborts_prior_when_signature_mismatches() -> None:
     assert execution_stats.mismatch_abort_count == 1
     assert execution_stats.first_step_mismatch_count == 0
     assert execution_stats.completed_prior_count == 0
+    kind_stats = execution_stats.kind_stats["forward_run"]
+    assert kind_stats.executed_prior_count == 1
+    assert kind_stats.executed_prior_steps == 2
+    assert kind_stats.aborted_prior_count == 1
+    assert kind_stats.aborted_prior_steps == 1
+    assert kind_stats.mismatch_abort_count == 1
+    assert kind_stats.completed_prior_count == 0
 
 
 def test_run_episode_tolerates_single_mismatch_when_tolerance_is_one() -> None:
@@ -1100,11 +1114,28 @@ def test_run_episode_records_prior_truncation_when_episode_ends_mid_option() -> 
     assert execution_stats.executed_prior_steps == 1
     assert execution_stats.completed_prior_count == 0
     assert execution_stats.truncated_prior_count == 1
+    kind_stats = execution_stats.kind_stats["forward_run"]
+    assert kind_stats.executed_prior_count == 1
+    assert kind_stats.executed_prior_steps == 1
+    assert kind_stats.completed_prior_count == 0
+    assert kind_stats.truncated_prior_count == 1
 
 
 def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> None:
     aggregate = PriorExecutionStats()
-    executed_episode = PriorExecutionStats(matched_prior_count=3, executed_prior_count=1, executed_prior_steps=2)
+    executed_episode = PriorExecutionStats(
+        matched_prior_count=3,
+        executed_prior_count=1,
+        executed_prior_steps=2,
+        kind_stats={
+            "forward_run": PriorKindStats(
+                matched_prior_count=3,
+                executed_prior_count=1,
+                executed_prior_steps=2,
+                completed_prior_count=1,
+            )
+        },
+    )
     idle_episode = PriorExecutionStats(matched_prior_count=1, executed_prior_count=0, executed_prior_steps=0)
 
     executed_rollout = Rollout(
@@ -1136,6 +1167,10 @@ def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> Non
     assert aggregate.matched_prior_count == 4
     assert aggregate.executed_prior_count == 1
     assert aggregate.executed_prior_steps == 2
+    assert aggregate.kind_stats["forward_run"].matched_prior_count == 3
+    assert aggregate.kind_stats["forward_run"].executed_prior_count == 1
+    assert aggregate.kind_stats["forward_run"].executed_prior_steps == 2
+    assert aggregate.kind_stats["forward_run"].completed_prior_count == 1
     assert aggregate.executed_episode_count == 1
     assert aggregate.idle_episode_count == 1
     assert aggregate.executed_episode_region_transition_total >= aggregate.idle_episode_region_transition_total

@@ -230,6 +230,7 @@ def main() -> None:
                                 "target_reuse_avg_prior_support": reuse_summary.avg_prior_support,
                                 "target_reuse_best_prior_support": reuse_summary.best_prior_support,
                                 "target_reuse_effect_described_item_count": reuse_summary.effect_described_item_count,
+                                "target_reuse_item_kind_counts_json": reuse_summary.item_kind_counts_json,
                                 "target_reuse_execution_mode": reuse_config.execution_mode,
                                 "target_reuse_min_execution_support": reuse_config.min_execution_support,
                                 "target_reuse_allow_trace_priors": reuse_config.allow_trace_priors,
@@ -261,6 +262,7 @@ def main() -> None:
                                 "target_reuse_idle_episode_avg_subgoal_score": reuse_summary.idle_episode_avg_subgoal_score,
                                 "target_reuse_idle_episode_avg_region_transitions": reuse_summary.idle_episode_avg_region_transitions,
                                 "target_reuse_idle_episode_avg_mobility": reuse_summary.idle_episode_avg_mobility,
+                                "target_reuse_prior_kind_stats_json": reuse_summary.prior_kind_stats_json,
                                 "target_reuse_probe_success": reuse_summary.probe_success_rate,
                             },
                         )
@@ -370,6 +372,7 @@ def _report_row(
     row["target_reuse_avg_prior_support"] = ""
     row["target_reuse_best_prior_support"] = ""
     row["target_reuse_effect_described_item_count"] = ""
+    row["target_reuse_item_kind_counts_json"] = ""
     row["target_reuse_execution_mode"] = ""
     row["target_reuse_min_execution_support"] = ""
     row["target_reuse_allow_trace_priors"] = ""
@@ -401,6 +404,7 @@ def _report_row(
     row["target_reuse_idle_episode_avg_subgoal_score"] = ""
     row["target_reuse_idle_episode_avg_region_transitions"] = ""
     row["target_reuse_idle_episode_avg_mobility"] = ""
+    row["target_reuse_prior_kind_stats_json"] = ""
     row["target_reuse_probe_success"] = ""
     if target_probe is not None:
         row.update(target_probe)

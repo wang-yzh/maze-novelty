@@ -450,6 +450,30 @@ not "can target-side priors be executed?"
 but "how should executed priors change adaptation dynamics enough to create success?"
 ```
 
+### Untagged: `prior-kind lifecycle diagnostics`
+
+Added:
+
+- `PriorKindStats` for per-`BehaviorPrior.kind` lifecycle tracking;
+- compact JSON fields for target reuse item kind counts and execution outcomes;
+- tests proving per-kind stats stay aligned with the existing aggregate counts.
+
+Result:
+
+The zero-score wall remains, but the failure is now more legible:
+
+```text
+motif priors fail mainly through effect and structural guards;
+ecology priors fail mainly through progress guard loss;
+operate open-loop priors complete often but remain semantically weak.
+```
+
+Lesson:
+
+The next breakthrough is unlikely to come from another global continuation rule.
+The project needs semantic behavior priors: intent, effect contract, and local
+re-execution policy rather than only state match plus action trace.
+
 ## Current State
 
 Current branch:

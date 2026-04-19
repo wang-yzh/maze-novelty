@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import json
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -81,6 +82,8 @@ class TargetReuseSummary:
     best_prior_support: int
     effect_described_item_count: int
     probe_success_rate: float
+    item_kind_counts_json: str = "{}"
+    prior_kind_stats_json: str = "{}"
     matched_prior_count: int = 0
     executed_prior_count: int = 0
     completed_prior_count: int = 0
@@ -109,6 +112,30 @@ class TargetReuseSummary:
     idle_episode_avg_subgoal_score: float = 0.0
     idle_episode_avg_region_transitions: float = 0.0
     idle_episode_avg_mobility: float = 0.0
+
+
+@dataclass
+class PriorKindStats:
+    matched_prior_count: int = 0
+    executed_prior_count: int = 0
+    completed_prior_count: int = 0
+    truncated_prior_count: int = 0
+    executed_prior_steps: int = 0
+    first_step_mismatch_count: int = 0
+    first_step_stall_count: int = 0
+    first_step_effect_mismatch_count: int = 0
+    first_step_structural_evidence_count: int = 0
+    mismatched_prior_steps: int = 0
+    stalled_prior_steps: int = 0
+    effect_mismatched_prior_steps: int = 0
+    structural_evidence_steps: int = 0
+    mismatch_abort_count: int = 0
+    stall_abort_count: int = 0
+    effect_abort_count: int = 0
+    structural_abort_count: int = 0
+    progress_lost_abort_count: int = 0
+    aborted_prior_count: int = 0
+    aborted_prior_steps: int = 0
 
 
 @dataclass
@@ -141,6 +168,7 @@ class PriorExecutionStats:
     idle_episode_subgoal_total: float = 0.0
     idle_episode_region_transition_total: float = 0.0
     idle_episode_mobility_total: float = 0.0
+    kind_stats: dict[str, PriorKindStats] = field(default_factory=dict)
 
 
 @dataclass
@@ -295,6 +323,7 @@ def evaluate_transfer_with_target_reuse(
             execution_stats.idle_episode_mobility_total,
             execution_stats.idle_episode_count,
         ),
+        prior_kind_stats_json=_prior_kind_stats_json(execution_stats),
     )
     abort_mode = (
         f"abort_t{reuse_config.mismatch_tolerance}"
@@ -441,6 +470,7 @@ def build_target_reuse_items(
             best_prior_support=int(max(supports)) if supports else 0,
             effect_described_item_count=sum(1 for item in items if item.prior.effect_trace),
             probe_success_rate=successes / max(1, config.probe_episodes),
+            item_kind_counts_json=_item_kind_counts_json(items),
         ),
     )
 
@@ -630,6 +660,9 @@ def _accumulate_execution_stats(
     aggregate.progress_lost_abort_count += episode.progress_lost_abort_count
     aggregate.aborted_prior_count += episode.aborted_prior_count
     aggregate.aborted_prior_steps += episode.aborted_prior_steps
+    for kind, source in episode.kind_stats.items():
+        target = _kind_stats(aggregate, kind)
+        _accumulate_prior_kind_stats(target, source)
 
 
 def _accumulate_episode_diagnostics(
@@ -656,6 +689,73 @@ def _average(total: float, count: int) -> float:
     if count <= 0:
         return 0.0
     return total / count
+
+
+def _kind_stats(stats: PriorExecutionStats, kind: str) -> PriorKindStats:
+    return stats.kind_stats.setdefault(kind, PriorKindStats())
+
+
+def _accumulate_prior_kind_stats(target: PriorKindStats, source: PriorKindStats) -> None:
+    target.matched_prior_count += source.matched_prior_count
+    target.executed_prior_count += source.executed_prior_count
+    target.completed_prior_count += source.completed_prior_count
+    target.truncated_prior_count += source.truncated_prior_count
+    target.executed_prior_steps += source.executed_prior_steps
+    target.first_step_mismatch_count += source.first_step_mismatch_count
+    target.first_step_stall_count += source.first_step_stall_count
+    target.first_step_effect_mismatch_count += source.first_step_effect_mismatch_count
+    target.first_step_structural_evidence_count += source.first_step_structural_evidence_count
+    target.mismatched_prior_steps += source.mismatched_prior_steps
+    target.stalled_prior_steps += source.stalled_prior_steps
+    target.effect_mismatched_prior_steps += source.effect_mismatched_prior_steps
+    target.structural_evidence_steps += source.structural_evidence_steps
+    target.mismatch_abort_count += source.mismatch_abort_count
+    target.stall_abort_count += source.stall_abort_count
+    target.effect_abort_count += source.effect_abort_count
+    target.structural_abort_count += source.structural_abort_count
+    target.progress_lost_abort_count += source.progress_lost_abort_count
+    target.aborted_prior_count += source.aborted_prior_count
+    target.aborted_prior_steps += source.aborted_prior_steps
+
+
+def _item_kind_counts_json(items: list[TargetReuseItem]) -> str:
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item.prior.kind] = counts.get(item.prior.kind, 0) + 1
+    return json.dumps(counts, sort_keys=True, separators=(",", ":"))
+
+
+def _prior_kind_stats_json(stats: PriorExecutionStats) -> str:
+    payload = {
+        kind: _prior_kind_stats_dict(kind_stats)
+        for kind, kind_stats in sorted(stats.kind_stats.items())
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _prior_kind_stats_dict(stats: PriorKindStats) -> dict[str, int]:
+    return {
+        "matched": stats.matched_prior_count,
+        "started": stats.executed_prior_count,
+        "completed": stats.completed_prior_count,
+        "truncated": stats.truncated_prior_count,
+        "aborted": stats.aborted_prior_count,
+        "executed_steps": stats.executed_prior_steps,
+        "aborted_steps": stats.aborted_prior_steps,
+        "mismatch_steps": stats.mismatched_prior_steps,
+        "stall_steps": stats.stalled_prior_steps,
+        "effect_mismatch_steps": stats.effect_mismatched_prior_steps,
+        "structural_evidence_steps": stats.structural_evidence_steps,
+        "first_step_mismatches": stats.first_step_mismatch_count,
+        "first_step_stalls": stats.first_step_stall_count,
+        "first_step_effect_mismatches": stats.first_step_effect_mismatch_count,
+        "first_step_structural_evidence": stats.first_step_structural_evidence_count,
+        "mismatch_aborts": stats.mismatch_abort_count,
+        "stall_aborts": stats.stall_abort_count,
+        "effect_aborts": stats.effect_abort_count,
+        "structural_aborts": stats.structural_abort_count,
+        "progress_lost_aborts": stats.progress_lost_abort_count,
+    }
 
 
 def _reinforce_target_reuse(
@@ -979,43 +1079,87 @@ def _assess_prior_execution_step(
     raise ValueError(msg)
 
 
+def _record_prior_match(stats: PriorExecutionStats, prior: BehaviorPrior) -> None:
+    stats.matched_prior_count += 1
+    _kind_stats(stats, prior.kind).matched_prior_count += 1
+
+
+def _record_prior_start(stats: PriorExecutionStats, step_prior: ActivePriorExecution) -> None:
+    stats.executed_prior_count += 1
+    _kind_stats(stats, step_prior.prior.kind).executed_prior_count += 1
+
+
 def _record_prior_step_assessment(
     stats: PriorExecutionStats,
     step_prior: ActivePriorExecution,
     assessment: PriorStepAssessment,
 ) -> None:
     is_first_step = step_prior.executed_steps == 0
+    kind_stats = _kind_stats(stats, step_prior.prior.kind)
     stats.executed_prior_steps += 1
+    kind_stats.executed_prior_steps += 1
     if assessment.mismatch:
         stats.mismatched_prior_steps += 1
+        kind_stats.mismatched_prior_steps += 1
         if is_first_step:
             stats.first_step_mismatch_count += 1
+            kind_stats.first_step_mismatch_count += 1
     if assessment.stalled:
         stats.stalled_prior_steps += 1
+        kind_stats.stalled_prior_steps += 1
         if is_first_step:
             stats.first_step_stall_count += 1
+            kind_stats.first_step_stall_count += 1
     if assessment.effect_mismatch:
         stats.effect_mismatched_prior_steps += 1
+        kind_stats.effect_mismatched_prior_steps += 1
         if is_first_step:
             stats.first_step_effect_mismatch_count += 1
+            kind_stats.first_step_effect_mismatch_count += 1
     if assessment.structural_evidence:
         stats.structural_evidence_steps += 1
+        kind_stats.structural_evidence_steps += 1
         if is_first_step:
             stats.first_step_structural_evidence_count += 1
+            kind_stats.first_step_structural_evidence_count += 1
 
 
-def _record_prior_abort(stats: PriorExecutionStats, abort_reason: str) -> None:
+def _record_prior_completion(stats: PriorExecutionStats, step_prior: ActivePriorExecution) -> None:
+    stats.completed_prior_count += 1
+    _kind_stats(stats, step_prior.prior.kind).completed_prior_count += 1
+
+
+def _record_prior_truncation(stats: PriorExecutionStats, step_prior: ActivePriorExecution) -> None:
+    stats.truncated_prior_count += 1
+    _kind_stats(stats, step_prior.prior.kind).truncated_prior_count += 1
+
+
+def _record_prior_abort(
+    stats: PriorExecutionStats,
+    step_prior: ActivePriorExecution,
+    abort_reason: str,
+    aborted_steps: int,
+) -> None:
+    kind_stats = _kind_stats(stats, step_prior.prior.kind)
     stats.aborted_prior_count += 1
+    stats.aborted_prior_steps += aborted_steps
+    kind_stats.aborted_prior_count += 1
+    kind_stats.aborted_prior_steps += aborted_steps
     if abort_reason == "mismatch":
         stats.mismatch_abort_count += 1
+        kind_stats.mismatch_abort_count += 1
     elif abort_reason == "stall":
         stats.stall_abort_count += 1
+        kind_stats.stall_abort_count += 1
     elif abort_reason == "effect":
         stats.effect_abort_count += 1
+        kind_stats.effect_abort_count += 1
     elif abort_reason == "structural":
         stats.structural_abort_count += 1
+        kind_stats.structural_abort_count += 1
     elif abort_reason == "progress_lost":
         stats.progress_lost_abort_count += 1
+        kind_stats.progress_lost_abort_count += 1
     elif abort_reason:
         msg = f"Unknown prior abort reason: {abort_reason}"
         raise ValueError(msg)
@@ -1089,7 +1233,7 @@ def _run_episode(
                     effect_match_mode,
                 )
                 if matched_prior is not None and execution_stats is not None:
-                    execution_stats.matched_prior_count += 1
+                    _record_prior_match(execution_stats, matched_prior)
             if matched_prior is not None and rng.random() < prior_execute_prob and matched_prior.action_trace:
                 active_prior = _make_active_prior_execution(
                     matched_prior,
@@ -1105,7 +1249,7 @@ def _run_episode(
                     if active_prior.remaining_effects:
                         expected_effect = active_prior.remaining_effects.pop(0)
                     if execution_stats is not None:
-                        execution_stats.executed_prior_count += 1
+                        _record_prior_start(execution_stats, active_prior)
                 else:
                     action = agent.act(state, 0.0)
             elif rng.random() < epsilon:
@@ -1134,12 +1278,16 @@ def _run_episode(
             step_prior.executed_steps += 1
             if assessment.abort_reason:
                 if execution_stats is not None:
-                    _record_prior_abort(execution_stats, assessment.abort_reason)
-                    execution_stats.aborted_prior_steps += len(step_prior.remaining_actions)
+                    _record_prior_abort(
+                        execution_stats,
+                        step_prior,
+                        assessment.abort_reason,
+                        len(step_prior.remaining_actions),
+                    )
                 active_prior = None
             elif step_prior is not None and not step_prior.remaining_actions:
                 if execution_stats is not None:
-                    execution_stats.completed_prior_count += 1
+                    _record_prior_completion(execution_stats, step_prior)
                 active_prior = None
         if train:
             agent.update(state, action, reward, next_state, done)
@@ -1152,7 +1300,7 @@ def _run_episode(
         success = bool(info["success"])
         if done:
             if active_prior is not None and active_prior.remaining_actions and execution_stats is not None:
-                execution_stats.truncated_prior_count += 1
+                _record_prior_truncation(execution_stats, active_prior)
             break
     return Rollout(
         states,
