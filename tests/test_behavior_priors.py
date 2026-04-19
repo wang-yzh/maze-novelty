@@ -915,6 +915,147 @@ def test_effect_structural_guard_aborts_when_structure_does_not_arrive() -> None
     assert execution_stats.completed_prior_count == 0
 
 
+def test_kind_structural_guard_requires_forward_run_to_move() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=2, local_shape=(1, 1, 1, 1, 1)),
+        _signature(direction=0, last_action=1),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 0), (0, 0), (0, 1)])
+    agent = QAgent(4, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=signatures[0],
+            action_trace=(2, 1),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(signatures),
+            effect_trace=("forward_move", "turn_right"),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        continuation_rule="kind_structural_guard",
+        structural_patience=1,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [2, 0]
+    assert execution_stats.effect_abort_count == 1
+    assert execution_stats.structural_abort_count == 0
+    assert execution_stats.completed_prior_count == 0
+
+
+def test_kind_structural_guard_allows_wall_follow_turn_before_movement() -> None:
+    env_signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1, topology=3),
+        _signature(direction=0, last_action=2, topology=3),
+    ]
+    prior_signatures = [
+        env_signatures[0],
+        _signature(direction=0, last_action=1, topology=2),
+        _signature(direction=0, last_action=2, topology=2),
+    ]
+    env = _DummyEnv(env_signatures, positions=[(0, 0), (0, 0), (0, 1)])
+    agent = QAgent(4, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    library.add(
+        BehaviorPrior(
+            kind="wall_follow_right",
+            initiation=prior_signatures[0],
+            action_trace=(1, 2),
+            termination=prior_signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(prior_signatures),
+            effect_trace=("turn_right", "forward_move"),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        continuation_rule="kind_structural_guard",
+        structural_patience=1,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [1, 2]
+    assert execution_stats.structural_evidence_steps == 1
+    assert execution_stats.completed_prior_count == 1
+    assert execution_stats.aborted_prior_count == 0
+
+
+def test_kind_structural_guard_requires_region_transition_evidence() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1),
+        _signature(direction=0, last_action=0, local_shape=(1, 1, 1, 1, 1)),
+        _signature(direction=0, last_action=1, local_shape=(1, 1, 1, 1, 1)),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 0), (0, 0), (0, 0), (0, 0)])
+    agent = QAgent(5, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="region_transition",
+            initiation=signatures[0],
+            action_trace=(1, 0, 1),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2, 3),
+            signature_trace=tuple(signatures),
+            effect_trace=("turn_right", "turn_left", "turn_right"),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=3,
+        abort_on_mismatch=True,
+        continuation_rule="kind_structural_guard",
+        structural_patience=1,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:3] == [1, 0, 0]
+    assert execution_stats.structural_evidence_steps == 0
+    assert execution_stats.structural_abort_count == 1
+    assert execution_stats.completed_prior_count == 0
+
+
 def test_run_episode_records_prior_truncation_when_episode_ends_mid_option() -> None:
     signatures = [
         _signature(direction=0, last_action=3),

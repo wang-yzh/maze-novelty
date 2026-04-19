@@ -123,7 +123,14 @@ def main() -> None:
     parser.add_argument("--reuse-mismatch-tolerance", type=int, default=0)
     parser.add_argument(
         "--reuse-continuation-rule",
-        choices=["signature", "motif_consistency", "effect_consistency", "effect_structural_guard", "progress_guard"],
+        choices=[
+            "signature",
+            "motif_consistency",
+            "effect_consistency",
+            "effect_structural_guard",
+            "kind_structural_guard",
+            "progress_guard",
+        ],
         default="signature",
     )
     parser.add_argument("--reuse-stall-tolerance", type=int, default=0)
@@ -307,7 +314,7 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             "effect_match_mode": "first_step",
             "min_execution_support": 2,
             "allow_trace_priors": False,
-            "continuation_rule": "effect_structural_guard",
+            "continuation_rule": "kind_structural_guard",
             "stall_tolerance": 0,
             "structural_patience": getattr(args, "reuse_structural_patience", 2),
         }

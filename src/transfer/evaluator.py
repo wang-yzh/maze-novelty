@@ -759,6 +759,33 @@ def _has_structural_evidence(
     return _manhattan_distance(step_prior.start_position, observed_position) >= 2
 
 
+def _has_kind_structural_evidence(
+    step_prior: ActivePriorExecution,
+    action: int,
+    previous_position: tuple[int, int],
+    observed_position: tuple[int, int],
+    observed_signature: StateSignature,
+) -> bool:
+    kind = step_prior.prior.kind
+    moved = observed_position != previous_position
+    if observed_signature.goal_bin != 4:
+        return True
+    if kind == "forward_run":
+        return action == 2 and moved
+    if kind == "region_transition":
+        return (
+            _position_region(previous_position) != _position_region(observed_position)
+            or _manhattan_distance(step_prior.start_position, observed_position) >= 2
+        )
+    if kind in {"wall_follow_left", "wall_follow_right"}:
+        return action == 2 and moved
+    if kind == "unstuck":
+        return moved or _manhattan_distance(step_prior.start_position, observed_position) >= 1
+    if kind == "target_trace":
+        return False
+    return _has_structural_evidence(step_prior, previous_position, observed_position, observed_signature)
+
+
 def _is_passable_local_category(category: int) -> bool:
     return category in (0, 2)
 
@@ -835,12 +862,21 @@ def _assess_prior_execution_step(
         else:
             step_prior.consecutive_mismatches = 0
 
-    structural_evidence = _has_structural_evidence(
-        step_prior,
-        previous_position,
-        observed_position,
-        observed_signature,
-    )
+    if continuation_rule == "kind_structural_guard":
+        structural_evidence = _has_kind_structural_evidence(
+            step_prior,
+            action,
+            previous_position,
+            observed_position,
+            observed_signature,
+        )
+    else:
+        structural_evidence = _has_structural_evidence(
+            step_prior,
+            previous_position,
+            observed_position,
+            observed_signature,
+        )
     if structural_evidence:
         step_prior.consecutive_no_structural_evidence = 0
     else:
@@ -890,6 +926,20 @@ def _assess_prior_execution_step(
             abort_reason=abort_reason,
         )
     if continuation_rule == "effect_structural_guard":
+        if effect_mismatch:
+            abort_reason = "effect"
+        elif step_prior.consecutive_no_structural_evidence > structural_patience:
+            abort_reason = "structural"
+        else:
+            abort_reason = ""
+        return PriorStepAssessment(
+            mismatch=mismatch,
+            stalled=stalled,
+            effect_mismatch=effect_mismatch,
+            structural_evidence=structural_evidence,
+            abort_reason=abort_reason,
+        )
+    if continuation_rule == "kind_structural_guard":
         if effect_mismatch:
             abort_reason = "effect"
         elif step_prior.consecutive_no_structural_evidence > structural_patience:

@@ -60,7 +60,7 @@ def test_branch_specific_preset_selects_method_defaults() -> None:
     assert motif["mismatch_tolerance"] == 1
     assert motif["execution_mode"] == "motif_fragments"
     assert motif["effect_match_mode"] == "first_step"
-    assert motif["continuation_rule"] == "effect_structural_guard"
+    assert motif["continuation_rule"] == "kind_structural_guard"
     assert motif["stall_tolerance"] == 0
     assert motif["structural_patience"] == 2
     assert motif["min_execution_support"] == 2
