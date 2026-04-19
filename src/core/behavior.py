@@ -16,6 +16,7 @@ class BehaviorPrior:
     support: int = 1
     state_trace: tuple[int, ...] = ()
     signature_trace: tuple[StateSignature, ...] = ()
+    effect_trace: tuple[str, ...] = ()
 
     def matches(self, signature: StateSignature, mode: str = "strict") -> bool:
         return self.initiation.matches(signature, mode=mode)
@@ -48,6 +49,7 @@ class BehaviorLibrary:
                 support=support,
                 state_trace=representative.state_trace,
                 signature_trace=representative.signature_trace,
+                effect_trace=representative.effect_trace,
             )
             self._trim()
             return
@@ -68,6 +70,7 @@ class BehaviorLibrary:
         str,
         tuple[int, tuple[int, int, int, int, int], int, int, int],
         tuple[int, ...],
+        tuple[str, ...],
         tuple[int, tuple[int, int, int, int, int], int, int, int] | None,
     ]:
         termination = None if prior.termination is None else prior.termination.canonical_key(self.match_mode)
@@ -75,6 +78,7 @@ class BehaviorLibrary:
             prior.kind,
             prior.initiation.canonical_key(self.match_mode),
             prior.action_trace,
+            prior.effect_trace,
             termination,
         )
 

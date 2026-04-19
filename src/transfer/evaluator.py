@@ -35,6 +35,7 @@ class TargetReuseConfig:
     probe_epsilon: float = 0.03
     match_mode: str = "strict"
     execution_mode: str = "default"
+    effect_match_mode: str = "none"
     min_subgoal_score: float = 0.018
     min_mobility: float = 0.035
     min_prior_quality: float = 0.28
@@ -77,6 +78,7 @@ class TargetReuseSummary:
     best_item_score: float
     avg_prior_support: float
     best_prior_support: int
+    effect_described_item_count: int
     probe_success_rate: float
     matched_prior_count: int = 0
     executed_prior_count: int = 0
@@ -85,10 +87,13 @@ class TargetReuseSummary:
     executed_prior_steps: int = 0
     first_step_mismatch_count: int = 0
     first_step_stall_count: int = 0
+    first_step_effect_mismatch_count: int = 0
     mismatched_prior_steps: int = 0
     stalled_prior_steps: int = 0
+    effect_mismatched_prior_steps: int = 0
     mismatch_abort_count: int = 0
     stall_abort_count: int = 0
+    effect_abort_count: int = 0
     progress_lost_abort_count: int = 0
     aborted_prior_count: int = 0
     aborted_prior_steps: int = 0
@@ -111,10 +116,13 @@ class PriorExecutionStats:
     executed_prior_steps: int = 0
     first_step_mismatch_count: int = 0
     first_step_stall_count: int = 0
+    first_step_effect_mismatch_count: int = 0
     mismatched_prior_steps: int = 0
     stalled_prior_steps: int = 0
+    effect_mismatched_prior_steps: int = 0
     mismatch_abort_count: int = 0
     stall_abort_count: int = 0
+    effect_abort_count: int = 0
     progress_lost_abort_count: int = 0
     aborted_prior_count: int = 0
     aborted_prior_steps: int = 0
@@ -133,9 +141,11 @@ class ActivePriorExecution:
     prior: BehaviorPrior
     remaining_actions: list[int]
     remaining_signatures: list[StateSignature]
+    remaining_effects: list[str]
     match_mode: str
     consecutive_mismatches: int = 0
     consecutive_stalls: int = 0
+    consecutive_effect_mismatches: int = 0
     executed_steps: int = 0
 
 
@@ -143,6 +153,7 @@ class ActivePriorExecution:
 class PriorStepAssessment:
     mismatch: bool = False
     stalled: bool = False
+    effect_mismatch: bool = False
     abort_reason: str = ""
 
 
@@ -235,10 +246,13 @@ def evaluate_transfer_with_target_reuse(
         executed_prior_steps=execution_stats.executed_prior_steps,
         first_step_mismatch_count=execution_stats.first_step_mismatch_count,
         first_step_stall_count=execution_stats.first_step_stall_count,
+        first_step_effect_mismatch_count=execution_stats.first_step_effect_mismatch_count,
         mismatched_prior_steps=execution_stats.mismatched_prior_steps,
         stalled_prior_steps=execution_stats.stalled_prior_steps,
+        effect_mismatched_prior_steps=execution_stats.effect_mismatched_prior_steps,
         mismatch_abort_count=execution_stats.mismatch_abort_count,
         stall_abort_count=execution_stats.stall_abort_count,
+        effect_abort_count=execution_stats.effect_abort_count,
         progress_lost_abort_count=execution_stats.progress_lost_abort_count,
         aborted_prior_count=execution_stats.aborted_prior_count,
         aborted_prior_steps=execution_stats.aborted_prior_steps,
@@ -281,6 +295,8 @@ def evaluate_transfer_with_target_reuse(
     )
     if reuse_config.continuation_rule != "signature":
         execution_mode = f"{execution_mode}|continue_{reuse_config.continuation_rule}"
+    if reuse_config.effect_match_mode != "none":
+        execution_mode = f"{execution_mode}|effect_{reuse_config.effect_match_mode}"
     return (
         TransferReport(
             method=f"{artifact.method}+target_reuse[{reuse_config.match_mode}|{execution_mode}]",
@@ -359,6 +375,7 @@ def adapt_agent(
             train=True,
             prior_library=prior_library if use_priors else None,
             execution_mode=active_reuse_config.execution_mode if active_reuse_config is not None else "default",
+            effect_match_mode=active_reuse_config.effect_match_mode if active_reuse_config is not None else "none",
             prior_execute_prob=active_reuse_config.execute_probability if active_reuse_config is not None else 0.0,
             execute_max_actions=active_reuse_config.execute_max_actions if active_reuse_config is not None else 0,
             abort_on_mismatch=active_reuse_config.abort_on_mismatch if active_reuse_config is not None else False,
@@ -408,6 +425,7 @@ def build_target_reuse_items(
             best_item_score=float(max(scores)) if scores else 0.0,
             avg_prior_support=float(np.mean(supports)) if supports else 0.0,
             best_prior_support=int(max(supports)) if supports else 0,
+            effect_described_item_count=sum(1 for item in items if item.prior.effect_trace),
             probe_success_rate=successes / max(1, config.probe_episodes),
         ),
     )
@@ -501,6 +519,7 @@ def _behavior_prior_from_motif(
         source="target_probe_navigation",
         state_trace=state_trace,
         signature_trace=tuple(rollout.state_signatures[start : end + 1]),
+        effect_trace=_movement_effect_trace(action_trace, tuple(rollout.positions[start : end + 1])),
     )
 
 
@@ -526,6 +545,10 @@ def _fallback_trace_prior(
         source="target_probe_trace",
         state_trace=tuple(int(state) for state in rollout.states[: action_count + 1]),
         signature_trace=tuple(rollout.state_signatures[: action_count + 1]),
+        effect_trace=_movement_effect_trace(
+            tuple(int(action) for action in rollout.actions[:action_count]),
+            tuple(rollout.positions[: action_count + 1]),
+        ),
     )
 
 
@@ -580,10 +603,13 @@ def _accumulate_execution_stats(
     aggregate.executed_prior_steps += episode.executed_prior_steps
     aggregate.first_step_mismatch_count += episode.first_step_mismatch_count
     aggregate.first_step_stall_count += episode.first_step_stall_count
+    aggregate.first_step_effect_mismatch_count += episode.first_step_effect_mismatch_count
     aggregate.mismatched_prior_steps += episode.mismatched_prior_steps
     aggregate.stalled_prior_steps += episode.stalled_prior_steps
+    aggregate.effect_mismatched_prior_steps += episode.effect_mismatched_prior_steps
     aggregate.mismatch_abort_count += episode.mismatch_abort_count
     aggregate.stall_abort_count += episode.stall_abort_count
+    aggregate.effect_abort_count += episode.effect_abort_count
     aggregate.progress_lost_abort_count += episode.progress_lost_abort_count
     aggregate.aborted_prior_count += episode.aborted_prior_count
     aggregate.aborted_prior_steps += episode.aborted_prior_steps
@@ -637,6 +663,32 @@ def _reinforce_target_reuse(
             agent.update(state, action, reward + (0.25 if done else 0.0), next_state, done)
 
 
+def _movement_effect_trace(
+    actions: tuple[int, ...],
+    positions: tuple[tuple[int, int], ...],
+) -> tuple[str, ...]:
+    effects = []
+    for idx, action in enumerate(actions):
+        previous = positions[idx] if idx < len(positions) else None
+        observed = positions[idx + 1] if idx + 1 < len(positions) else previous
+        effects.append(_movement_effect(action, previous, observed))
+    return tuple(effects)
+
+
+def _movement_effect(
+    action: int,
+    previous_position: tuple[int, int] | None,
+    observed_position: tuple[int, int] | None,
+) -> str:
+    if action == 0:
+        return "turn_left"
+    if action == 1:
+        return "turn_right"
+    if action == 2:
+        return "forward_move" if observed_position != previous_position else "forward_blocked"
+    return "unknown"
+
+
 def _make_active_prior_execution(
     prior: BehaviorPrior,
     execute_max_actions: int,
@@ -648,10 +700,14 @@ def _make_active_prior_execution(
     expected_signatures = []
     if len(prior.signature_trace) >= len(limited_trace) + 1:
         expected_signatures = list(prior.signature_trace[1 : len(limited_trace) + 1])
+    expected_effects = []
+    if len(prior.effect_trace) >= len(limited_trace):
+        expected_effects = list(prior.effect_trace[: len(limited_trace)])
     return ActivePriorExecution(
         prior=prior,
         remaining_actions=limited_trace,
         remaining_signatures=expected_signatures,
+        remaining_effects=expected_effects,
         match_mode=match_mode,
     )
 
@@ -660,9 +716,51 @@ def _has_progress_evidence(signature: StateSignature) -> bool:
     return signature.goal_bin != 4 or signature.topology in (1, 2, 3)
 
 
+def _is_passable_local_category(category: int) -> bool:
+    return category in (0, 2)
+
+
+def _first_step_effect_matches(
+    prior: BehaviorPrior,
+    signature: StateSignature,
+    effect_match_mode: str,
+) -> bool:
+    if effect_match_mode == "none":
+        return True
+    if effect_match_mode != "first_step":
+        msg = f"Unknown effect match mode: {effect_match_mode}"
+        raise ValueError(msg)
+    if not prior.action_trace or not prior.effect_trace:
+        return True
+
+    action = prior.action_trace[0]
+    effect = prior.effect_trace[0]
+    if action == 2:
+        front_passable = _is_passable_local_category(signature.local_shape[0])
+        if effect == "forward_move":
+            return front_passable
+        if effect == "forward_blocked":
+            return not front_passable
+        return True
+    if action == 0:
+        if effect != "turn_left":
+            return False
+        if len(prior.signature_trace) < 2:
+            return True
+        return prior.signature_trace[1].local_shape[0] == signature.local_shape[3]
+    if action == 1:
+        if effect != "turn_right":
+            return False
+        if len(prior.signature_trace) < 2:
+            return True
+        return prior.signature_trace[1].local_shape[0] == signature.local_shape[4]
+    return True
+
+
 def _assess_prior_execution_step(
     step_prior: ActivePriorExecution,
     action: int,
+    expected_effect: str | None,
     expected_signature: StateSignature | None,
     observed_signature: StateSignature,
     previous_position: tuple[int, int],
@@ -678,6 +776,13 @@ def _assess_prior_execution_step(
     else:
         step_prior.consecutive_stalls = 0
 
+    observed_effect = _movement_effect(action, previous_position, observed_position)
+    effect_mismatch = expected_effect is not None and expected_effect != observed_effect
+    if effect_mismatch:
+        step_prior.consecutive_effect_mismatches += 1
+    else:
+        step_prior.consecutive_effect_mismatches = 0
+
     mismatch = False
     if expected_signature is not None:
         mismatch = not expected_signature.matches(observed_signature, mode=step_prior.match_mode)
@@ -687,25 +792,48 @@ def _assess_prior_execution_step(
             step_prior.consecutive_mismatches = 0
 
     if not abort_on_mismatch:
-        return PriorStepAssessment(mismatch=mismatch, stalled=stalled)
+        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, effect_mismatch=effect_mismatch)
 
     if continuation_rule == "signature":
         abort_reason = "mismatch" if mismatch and step_prior.consecutive_mismatches > mismatch_tolerance else ""
-        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason=abort_reason)
+        return PriorStepAssessment(
+            mismatch=mismatch,
+            stalled=stalled,
+            effect_mismatch=effect_mismatch,
+            abort_reason=abort_reason,
+        )
     if continuation_rule == "motif_consistency":
         if stalled and step_prior.consecutive_stalls > stall_tolerance:
-            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason="stall")
+            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, effect_mismatch=effect_mismatch, abort_reason="stall")
         abort_reason = "mismatch" if mismatch and step_prior.consecutive_mismatches > mismatch_tolerance else ""
-        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason=abort_reason)
+        return PriorStepAssessment(
+            mismatch=mismatch,
+            stalled=stalled,
+            effect_mismatch=effect_mismatch,
+            abort_reason=abort_reason,
+        )
+    if continuation_rule == "effect_consistency":
+        abort_reason = "effect" if effect_mismatch else ""
+        return PriorStepAssessment(
+            mismatch=mismatch,
+            stalled=stalled,
+            effect_mismatch=effect_mismatch,
+            abort_reason=abort_reason,
+        )
     if continuation_rule == "progress_guard":
         if stalled and step_prior.consecutive_stalls > stall_tolerance:
-            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason="stall")
+            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, effect_mismatch=effect_mismatch, abort_reason="stall")
         abort_reason = "progress_lost" if (
             mismatch
             and step_prior.consecutive_mismatches > mismatch_tolerance
             and not _has_progress_evidence(observed_signature)
         ) else ""
-        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason=abort_reason)
+        return PriorStepAssessment(
+            mismatch=mismatch,
+            stalled=stalled,
+            effect_mismatch=effect_mismatch,
+            abort_reason=abort_reason,
+        )
 
     msg = f"Unknown prior continuation rule: {continuation_rule}"
     raise ValueError(msg)
@@ -726,6 +854,10 @@ def _record_prior_step_assessment(
         stats.stalled_prior_steps += 1
         if is_first_step:
             stats.first_step_stall_count += 1
+    if assessment.effect_mismatch:
+        stats.effect_mismatched_prior_steps += 1
+        if is_first_step:
+            stats.first_step_effect_mismatch_count += 1
 
 
 def _record_prior_abort(stats: PriorExecutionStats, abort_reason: str) -> None:
@@ -734,6 +866,8 @@ def _record_prior_abort(stats: PriorExecutionStats, abort_reason: str) -> None:
         stats.mismatch_abort_count += 1
     elif abort_reason == "stall":
         stats.stall_abort_count += 1
+    elif abort_reason == "effect":
+        stats.effect_abort_count += 1
     elif abort_reason == "progress_lost":
         stats.progress_lost_abort_count += 1
     elif abort_reason:
@@ -745,17 +879,19 @@ def _select_prior_for_execution(
     prior_library: BehaviorLibrary,
     signature: StateSignature,
     execution_mode: str,
+    effect_match_mode: str,
 ) -> BehaviorPrior | None:
+    candidates = [
+        prior
+        for prior in prior_library.priors
+        if prior.matches(signature, mode=prior_library.match_mode)
+        and _first_step_effect_matches(prior, signature, effect_match_mode)
+    ]
+    if not candidates:
+        return None
     if execution_mode == "motif_fragments":
-        candidates = [
-            prior
-            for prior in prior_library.priors
-            if prior.matches(signature, mode=prior_library.match_mode)
-        ]
-        if not candidates:
-            return None
         return max(candidates, key=lambda prior: (prior.support, -len(prior.action_trace), prior.score))
-    return prior_library.best_match(signature)
+    return max(candidates, key=lambda prior: (prior.score, prior.support, -len(prior.action_trace)))
 
 
 def _run_episode(
@@ -766,6 +902,7 @@ def _run_episode(
     train: bool,
     prior_library: BehaviorLibrary | None = None,
     execution_mode: str = "default",
+    effect_match_mode: str = "none",
     prior_execute_prob: float = 0.0,
     execute_max_actions: int = 0,
     abort_on_mismatch: bool = False,
@@ -785,6 +922,7 @@ def _run_episode(
     while True:
         step_prior: ActivePriorExecution | None = None
         expected_signature = None
+        expected_effect = None
         executing_prior = active_prior is not None and bool(active_prior.remaining_actions)
         if executing_prior:
             assert active_prior is not None
@@ -792,10 +930,17 @@ def _run_episode(
             action = active_prior.remaining_actions.pop(0)
             if active_prior.remaining_signatures:
                 expected_signature = active_prior.remaining_signatures.pop(0)
+            if active_prior.remaining_effects:
+                expected_effect = active_prior.remaining_effects.pop(0)
         else:
             matched_prior = None
             if prior_library is not None and prior_execute_prob > 0.0:
-                matched_prior = _select_prior_for_execution(prior_library, env.state_signature, execution_mode)
+                matched_prior = _select_prior_for_execution(
+                    prior_library,
+                    env.state_signature,
+                    execution_mode,
+                    effect_match_mode,
+                )
                 if matched_prior is not None and execution_stats is not None:
                     execution_stats.matched_prior_count += 1
             if matched_prior is not None and rng.random() < prior_execute_prob and matched_prior.action_trace:
@@ -809,6 +954,8 @@ def _run_episode(
                     action = active_prior.remaining_actions.pop(0)
                     if active_prior.remaining_signatures:
                         expected_signature = active_prior.remaining_signatures.pop(0)
+                    if active_prior.remaining_effects:
+                        expected_effect = active_prior.remaining_effects.pop(0)
                     if execution_stats is not None:
                         execution_stats.executed_prior_count += 1
                 else:
@@ -823,6 +970,7 @@ def _run_episode(
             assessment = _assess_prior_execution_step(
                 step_prior,
                 action,
+                expected_effect,
                 expected_signature,
                 info["state_signature"],
                 previous_position,

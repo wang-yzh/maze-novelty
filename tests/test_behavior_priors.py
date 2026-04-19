@@ -64,6 +64,7 @@ def test_behavior_library_merges_duplicate_priors() -> None:
     assert merged.support == 2
     assert np.isclose(merged.score, 0.60)
     assert merged.state_trace == high_score.state_trace
+    assert merged.effect_trace == high_score.effect_trace
 
 
 def test_behavior_library_merges_direction_variants_in_direction_agnostic_mode() -> None:
@@ -230,11 +231,96 @@ def test_motif_fragment_selection_prefers_supported_shorter_prior() -> None:
         )
     )
 
-    selected = _select_prior_for_execution(library, query, "motif_fragments")
+    selected = _select_prior_for_execution(library, query, "motif_fragments", "none")
 
     assert selected is not None
     assert selected.action_trace == (2, 2)
     assert selected.support == 3
+
+
+def test_first_step_effect_matching_filters_incompatible_turn_prior() -> None:
+    query = _signature(
+        direction=0,
+        last_action=3,
+        local_shape=(0, 0, 1, 0, 1),
+    )
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    library.add(
+        BehaviorPrior(
+            kind="wall_follow_left",
+            initiation=query,
+            action_trace=(0,),
+            termination=_signature(local_shape=(1, 0, 1, 0, 1), last_action=0),
+            score=0.95,
+            state_trace=(0, 1),
+            signature_trace=(
+                query,
+                _signature(local_shape=(1, 0, 1, 0, 1), last_action=0),
+            ),
+            effect_trace=("turn_left",),
+        )
+    )
+    library.add(
+        BehaviorPrior(
+            kind="wall_follow_left",
+            initiation=query,
+            action_trace=(0,),
+            termination=_signature(local_shape=(0, 1, 0, 1, 0), last_action=0),
+            score=0.70,
+            state_trace=(2, 3),
+            signature_trace=(
+                query,
+                _signature(local_shape=(0, 1, 0, 1, 0), last_action=0),
+            ),
+            effect_trace=("turn_left",),
+        )
+    )
+
+    loose_selected = _select_prior_for_execution(library, query, "default", "none")
+    filtered_selected = _select_prior_for_execution(library, query, "default", "first_step")
+
+    assert loose_selected is not None
+    assert loose_selected.score == 0.95
+    assert filtered_selected is not None
+    assert filtered_selected.score == 0.70
+
+
+def test_first_step_effect_matching_filters_blocked_forward_prior() -> None:
+    query = _signature(
+        direction=0,
+        last_action=3,
+        local_shape=(0, 0, 1, 0, 1),
+    )
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=query,
+            action_trace=(2,),
+            termination=_signature(last_action=2),
+            score=0.95,
+            state_trace=(0, 1),
+            signature_trace=(query, _signature(last_action=2)),
+            effect_trace=("forward_blocked",),
+        )
+    )
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=query,
+            action_trace=(2,),
+            termination=_signature(last_action=2, topology=3),
+            score=0.70,
+            state_trace=(2, 3),
+            signature_trace=(query, _signature(last_action=2, topology=3)),
+            effect_trace=("forward_move",),
+        )
+    )
+
+    selected = _select_prior_for_execution(library, query, "default", "first_step")
+
+    assert selected is not None
+    assert selected.effect_trace == ("forward_move",)
 
 
 def test_target_reuse_extracts_navigation_prior_from_rollout() -> None:
@@ -261,6 +347,7 @@ def test_target_reuse_extracts_navigation_prior_from_rollout() -> None:
     assert priors[0].kind == "forward_run"
     assert priors[0].action_trace == (2, 2, 2)
     assert priors[0].state_trace == (0, 1, 2, 3)
+    assert priors[0].effect_trace == ("forward_move", "forward_move", "forward_move")
 
 
 def test_run_episode_executes_matching_behavior_prior_before_agent_policy() -> None:
@@ -615,6 +702,105 @@ def test_progress_guard_continuation_tolerates_mismatch_while_progress_evidence_
     assert execution_stats.first_step_mismatch_count == 1
     assert execution_stats.completed_prior_count == 1
     assert execution_stats.aborted_prior_count == 0
+
+
+def test_effect_consistency_tolerates_signature_mismatch_when_effect_matches() -> None:
+    env_signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1, topology=3),
+        _signature(direction=0, last_action=2, topology=3),
+    ]
+    prior_signatures = [
+        env_signatures[0],
+        _signature(direction=0, last_action=1, topology=2),
+        _signature(direction=0, last_action=2, topology=2),
+    ]
+    env = _DummyEnv(env_signatures, positions=[(0, 0), (0, 0), (0, 1)])
+    agent = QAgent(4, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    library.add(
+        BehaviorPrior(
+            kind="wall_follow_right",
+            initiation=prior_signatures[0],
+            action_trace=(1, 2),
+            termination=prior_signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(prior_signatures),
+            effect_trace=("turn_right", "forward_move"),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        mismatch_tolerance=0,
+        continuation_rule="effect_consistency",
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [1, 2]
+    assert execution_stats.executed_prior_steps == 2
+    assert execution_stats.mismatched_prior_steps == 2
+    assert execution_stats.effect_mismatched_prior_steps == 0
+    assert execution_stats.completed_prior_count == 1
+    assert execution_stats.aborted_prior_count == 0
+
+
+def test_effect_consistency_aborts_when_movement_effect_mismatches() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=2, local_shape=(1, 1, 1, 1, 1)),
+        _signature(direction=0, last_action=1),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 0), (0, 0), (0, 1)])
+    agent = QAgent(4, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=signatures[0],
+            action_trace=(2, 1),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2),
+            signature_trace=tuple(signatures),
+            effect_trace=("forward_move", "turn_right"),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=2,
+        abort_on_mismatch=True,
+        continuation_rule="effect_consistency",
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [2, 0]
+    assert execution_stats.executed_prior_steps == 1
+    assert execution_stats.first_step_effect_mismatch_count == 1
+    assert execution_stats.effect_mismatched_prior_steps == 1
+    assert execution_stats.effect_abort_count == 1
+    assert execution_stats.aborted_prior_count == 1
+    assert execution_stats.completed_prior_count == 0
 
 
 def test_run_episode_records_prior_truncation_when_episode_ends_mid_option() -> None:
