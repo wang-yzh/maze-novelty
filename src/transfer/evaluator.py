@@ -52,6 +52,7 @@ class TargetReuseConfig:
     mismatch_tolerance: int = 0
     continuation_rule: str = "signature"
     stall_tolerance: int = 0
+    structural_patience: int = 2
 
 
 @dataclass(frozen=True)
@@ -88,12 +89,15 @@ class TargetReuseSummary:
     first_step_mismatch_count: int = 0
     first_step_stall_count: int = 0
     first_step_effect_mismatch_count: int = 0
+    first_step_structural_evidence_count: int = 0
     mismatched_prior_steps: int = 0
     stalled_prior_steps: int = 0
     effect_mismatched_prior_steps: int = 0
+    structural_evidence_steps: int = 0
     mismatch_abort_count: int = 0
     stall_abort_count: int = 0
     effect_abort_count: int = 0
+    structural_abort_count: int = 0
     progress_lost_abort_count: int = 0
     aborted_prior_count: int = 0
     aborted_prior_steps: int = 0
@@ -117,12 +121,15 @@ class PriorExecutionStats:
     first_step_mismatch_count: int = 0
     first_step_stall_count: int = 0
     first_step_effect_mismatch_count: int = 0
+    first_step_structural_evidence_count: int = 0
     mismatched_prior_steps: int = 0
     stalled_prior_steps: int = 0
     effect_mismatched_prior_steps: int = 0
+    structural_evidence_steps: int = 0
     mismatch_abort_count: int = 0
     stall_abort_count: int = 0
     effect_abort_count: int = 0
+    structural_abort_count: int = 0
     progress_lost_abort_count: int = 0
     aborted_prior_count: int = 0
     aborted_prior_steps: int = 0
@@ -143,9 +150,11 @@ class ActivePriorExecution:
     remaining_signatures: list[StateSignature]
     remaining_effects: list[str]
     match_mode: str
+    start_position: tuple[int, int]
     consecutive_mismatches: int = 0
     consecutive_stalls: int = 0
     consecutive_effect_mismatches: int = 0
+    consecutive_no_structural_evidence: int = 0
     executed_steps: int = 0
 
 
@@ -154,6 +163,7 @@ class PriorStepAssessment:
     mismatch: bool = False
     stalled: bool = False
     effect_mismatch: bool = False
+    structural_evidence: bool = False
     abort_reason: str = ""
 
 
@@ -247,12 +257,15 @@ def evaluate_transfer_with_target_reuse(
         first_step_mismatch_count=execution_stats.first_step_mismatch_count,
         first_step_stall_count=execution_stats.first_step_stall_count,
         first_step_effect_mismatch_count=execution_stats.first_step_effect_mismatch_count,
+        first_step_structural_evidence_count=execution_stats.first_step_structural_evidence_count,
         mismatched_prior_steps=execution_stats.mismatched_prior_steps,
         stalled_prior_steps=execution_stats.stalled_prior_steps,
         effect_mismatched_prior_steps=execution_stats.effect_mismatched_prior_steps,
+        structural_evidence_steps=execution_stats.structural_evidence_steps,
         mismatch_abort_count=execution_stats.mismatch_abort_count,
         stall_abort_count=execution_stats.stall_abort_count,
         effect_abort_count=execution_stats.effect_abort_count,
+        structural_abort_count=execution_stats.structural_abort_count,
         progress_lost_abort_count=execution_stats.progress_lost_abort_count,
         aborted_prior_count=execution_stats.aborted_prior_count,
         aborted_prior_steps=execution_stats.aborted_prior_steps,
@@ -382,6 +395,7 @@ def adapt_agent(
             mismatch_tolerance=active_reuse_config.mismatch_tolerance if active_reuse_config is not None else 0,
             continuation_rule=active_reuse_config.continuation_rule if active_reuse_config is not None else "signature",
             stall_tolerance=active_reuse_config.stall_tolerance if active_reuse_config is not None else 0,
+            structural_patience=active_reuse_config.structural_patience if active_reuse_config is not None else 2,
             execution_stats=episode_execution_stats if use_priors else None,
         )
         if use_priors:
@@ -604,12 +618,15 @@ def _accumulate_execution_stats(
     aggregate.first_step_mismatch_count += episode.first_step_mismatch_count
     aggregate.first_step_stall_count += episode.first_step_stall_count
     aggregate.first_step_effect_mismatch_count += episode.first_step_effect_mismatch_count
+    aggregate.first_step_structural_evidence_count += episode.first_step_structural_evidence_count
     aggregate.mismatched_prior_steps += episode.mismatched_prior_steps
     aggregate.stalled_prior_steps += episode.stalled_prior_steps
     aggregate.effect_mismatched_prior_steps += episode.effect_mismatched_prior_steps
+    aggregate.structural_evidence_steps += episode.structural_evidence_steps
     aggregate.mismatch_abort_count += episode.mismatch_abort_count
     aggregate.stall_abort_count += episode.stall_abort_count
     aggregate.effect_abort_count += episode.effect_abort_count
+    aggregate.structural_abort_count += episode.structural_abort_count
     aggregate.progress_lost_abort_count += episode.progress_lost_abort_count
     aggregate.aborted_prior_count += episode.aborted_prior_count
     aggregate.aborted_prior_steps += episode.aborted_prior_steps
@@ -693,6 +710,7 @@ def _make_active_prior_execution(
     prior: BehaviorPrior,
     execute_max_actions: int,
     match_mode: str,
+    start_position: tuple[int, int],
 ) -> ActivePriorExecution | None:
     limited_trace = list(int(action) for action in prior.action_trace[: max(1, execute_max_actions)])
     if not limited_trace:
@@ -709,11 +727,36 @@ def _make_active_prior_execution(
         remaining_signatures=expected_signatures,
         remaining_effects=expected_effects,
         match_mode=match_mode,
+        start_position=start_position,
     )
 
 
 def _has_progress_evidence(signature: StateSignature) -> bool:
     return signature.goal_bin != 4 or signature.topology in (1, 2, 3)
+
+
+def _position_region(position: tuple[int, int], region_size: int = 4) -> tuple[int, int]:
+    row, col = position
+    return row // region_size, col // region_size
+
+
+def _manhattan_distance(position: tuple[int, int], other: tuple[int, int]) -> int:
+    return abs(position[0] - other[0]) + abs(position[1] - other[1])
+
+
+def _has_structural_evidence(
+    step_prior: ActivePriorExecution,
+    previous_position: tuple[int, int],
+    observed_position: tuple[int, int],
+    observed_signature: StateSignature,
+) -> bool:
+    if observed_signature.goal_bin != 4:
+        return True
+    if observed_position != previous_position:
+        return True
+    if _position_region(previous_position) != _position_region(observed_position):
+        return True
+    return _manhattan_distance(step_prior.start_position, observed_position) >= 2
 
 
 def _is_passable_local_category(category: int) -> bool:
@@ -769,6 +812,7 @@ def _assess_prior_execution_step(
     mismatch_tolerance: int,
     continuation_rule: str,
     stall_tolerance: int,
+    structural_patience: int,
 ) -> PriorStepAssessment:
     stalled = action == 2 and observed_position == previous_position
     if stalled:
@@ -791,8 +835,24 @@ def _assess_prior_execution_step(
         else:
             step_prior.consecutive_mismatches = 0
 
+    structural_evidence = _has_structural_evidence(
+        step_prior,
+        previous_position,
+        observed_position,
+        observed_signature,
+    )
+    if structural_evidence:
+        step_prior.consecutive_no_structural_evidence = 0
+    else:
+        step_prior.consecutive_no_structural_evidence += 1
+
     if not abort_on_mismatch:
-        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, effect_mismatch=effect_mismatch)
+        return PriorStepAssessment(
+            mismatch=mismatch,
+            stalled=stalled,
+            effect_mismatch=effect_mismatch,
+            structural_evidence=structural_evidence,
+        )
 
     if continuation_rule == "signature":
         abort_reason = "mismatch" if mismatch and step_prior.consecutive_mismatches > mismatch_tolerance else ""
@@ -800,16 +860,24 @@ def _assess_prior_execution_step(
             mismatch=mismatch,
             stalled=stalled,
             effect_mismatch=effect_mismatch,
+            structural_evidence=structural_evidence,
             abort_reason=abort_reason,
         )
     if continuation_rule == "motif_consistency":
         if stalled and step_prior.consecutive_stalls > stall_tolerance:
-            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, effect_mismatch=effect_mismatch, abort_reason="stall")
+            return PriorStepAssessment(
+                mismatch=mismatch,
+                stalled=stalled,
+                effect_mismatch=effect_mismatch,
+                structural_evidence=structural_evidence,
+                abort_reason="stall",
+            )
         abort_reason = "mismatch" if mismatch and step_prior.consecutive_mismatches > mismatch_tolerance else ""
         return PriorStepAssessment(
             mismatch=mismatch,
             stalled=stalled,
             effect_mismatch=effect_mismatch,
+            structural_evidence=structural_evidence,
             abort_reason=abort_reason,
         )
     if continuation_rule == "effect_consistency":
@@ -818,11 +886,32 @@ def _assess_prior_execution_step(
             mismatch=mismatch,
             stalled=stalled,
             effect_mismatch=effect_mismatch,
+            structural_evidence=structural_evidence,
+            abort_reason=abort_reason,
+        )
+    if continuation_rule == "effect_structural_guard":
+        if effect_mismatch:
+            abort_reason = "effect"
+        elif step_prior.consecutive_no_structural_evidence > structural_patience:
+            abort_reason = "structural"
+        else:
+            abort_reason = ""
+        return PriorStepAssessment(
+            mismatch=mismatch,
+            stalled=stalled,
+            effect_mismatch=effect_mismatch,
+            structural_evidence=structural_evidence,
             abort_reason=abort_reason,
         )
     if continuation_rule == "progress_guard":
         if stalled and step_prior.consecutive_stalls > stall_tolerance:
-            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, effect_mismatch=effect_mismatch, abort_reason="stall")
+            return PriorStepAssessment(
+                mismatch=mismatch,
+                stalled=stalled,
+                effect_mismatch=effect_mismatch,
+                structural_evidence=structural_evidence,
+                abort_reason="stall",
+            )
         abort_reason = "progress_lost" if (
             mismatch
             and step_prior.consecutive_mismatches > mismatch_tolerance
@@ -832,6 +921,7 @@ def _assess_prior_execution_step(
             mismatch=mismatch,
             stalled=stalled,
             effect_mismatch=effect_mismatch,
+            structural_evidence=structural_evidence,
             abort_reason=abort_reason,
         )
 
@@ -858,6 +948,10 @@ def _record_prior_step_assessment(
         stats.effect_mismatched_prior_steps += 1
         if is_first_step:
             stats.first_step_effect_mismatch_count += 1
+    if assessment.structural_evidence:
+        stats.structural_evidence_steps += 1
+        if is_first_step:
+            stats.first_step_structural_evidence_count += 1
 
 
 def _record_prior_abort(stats: PriorExecutionStats, abort_reason: str) -> None:
@@ -868,6 +962,8 @@ def _record_prior_abort(stats: PriorExecutionStats, abort_reason: str) -> None:
         stats.stall_abort_count += 1
     elif abort_reason == "effect":
         stats.effect_abort_count += 1
+    elif abort_reason == "structural":
+        stats.structural_abort_count += 1
     elif abort_reason == "progress_lost":
         stats.progress_lost_abort_count += 1
     elif abort_reason:
@@ -909,6 +1005,7 @@ def _run_episode(
     mismatch_tolerance: int = 0,
     continuation_rule: str = "signature",
     stall_tolerance: int = 0,
+    structural_patience: int = 2,
     execution_stats: PriorExecutionStats | None = None,
 ) -> Rollout:
     state = env.reset()
@@ -948,6 +1045,7 @@ def _run_episode(
                     matched_prior,
                     execute_max_actions,
                     prior_library.match_mode if prior_library is not None else "strict",
+                    env.position,
                 )
                 if active_prior is not None:
                     step_prior = active_prior
@@ -979,6 +1077,7 @@ def _run_episode(
                 mismatch_tolerance,
                 continuation_rule,
                 stall_tolerance,
+                structural_patience,
             )
             if execution_stats is not None:
                 _record_prior_step_assessment(execution_stats, step_prior, assessment)

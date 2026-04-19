@@ -30,6 +30,7 @@ def test_uniform_preset_uses_cli_values() -> None:
     assert config["execution_mode"] == "default"
     assert config["continuation_rule"] == "signature"
     assert config["stall_tolerance"] == 0
+    assert config["structural_patience"] == 2
     assert config["min_execution_support"] == 1
     assert config["allow_trace_priors"] is True
     assert config["reinforce_passes"] == 5
@@ -59,8 +60,9 @@ def test_branch_specific_preset_selects_method_defaults() -> None:
     assert motif["mismatch_tolerance"] == 1
     assert motif["execution_mode"] == "motif_fragments"
     assert motif["effect_match_mode"] == "first_step"
-    assert motif["continuation_rule"] == "effect_consistency"
+    assert motif["continuation_rule"] == "effect_structural_guard"
     assert motif["stall_tolerance"] == 0
+    assert motif["structural_patience"] == 2
     assert motif["min_execution_support"] == 2
     assert motif["allow_trace_priors"] is False
     assert subgoal["abort_on_mismatch"] is True
@@ -69,3 +71,4 @@ def test_branch_specific_preset_selects_method_defaults() -> None:
     assert subgoal["effect_match_mode"] == "first_step"
     assert subgoal["continuation_rule"] == "progress_guard"
     assert subgoal["stall_tolerance"] == 1
+    assert subgoal["structural_patience"] == 2

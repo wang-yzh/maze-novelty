@@ -69,16 +69,20 @@ SUMMARY_METRICS = [
     "target_reuse_first_step_mismatch_count",
     "target_reuse_first_step_stall_count",
     "target_reuse_first_step_effect_mismatch_count",
+    "target_reuse_first_step_structural_evidence_count",
     "target_reuse_mismatched_prior_steps",
     "target_reuse_stalled_prior_steps",
     "target_reuse_effect_mismatched_prior_steps",
+    "target_reuse_structural_evidence_steps",
     "target_reuse_mismatch_abort_count",
     "target_reuse_stall_abort_count",
     "target_reuse_effect_abort_count",
+    "target_reuse_structural_abort_count",
     "target_reuse_progress_lost_abort_count",
     "target_reuse_aborted_prior_count",
     "target_reuse_aborted_prior_steps",
     "target_reuse_mismatch_tolerance",
+    "target_reuse_structural_patience",
     "target_reuse_executed_episode_count",
     "target_reuse_idle_episode_count",
     "target_reuse_executed_episode_avg_subgoal_score",
@@ -119,10 +123,11 @@ def main() -> None:
     parser.add_argument("--reuse-mismatch-tolerance", type=int, default=0)
     parser.add_argument(
         "--reuse-continuation-rule",
-        choices=["signature", "motif_consistency", "effect_consistency", "progress_guard"],
+        choices=["signature", "motif_consistency", "effect_consistency", "effect_structural_guard", "progress_guard"],
         default="signature",
     )
     parser.add_argument("--reuse-stall-tolerance", type=int, default=0)
+    parser.add_argument("--reuse-structural-patience", type=int, default=2)
     parser.add_argument("--reuse-probe-episodes", type=int, default=6)
     parser.add_argument("--reuse-reinforce-passes", type=int, default=4)
     parser.add_argument("--reuse-reward", type=float, default=0.075)
@@ -211,6 +216,7 @@ def main() -> None:
                                 "target_reuse_mismatch_tolerance": reuse_config.mismatch_tolerance,
                                 "target_reuse_continuation_rule": reuse_config.continuation_rule,
                                 "target_reuse_stall_tolerance": reuse_config.stall_tolerance,
+                                "target_reuse_structural_patience": reuse_config.structural_patience,
                                 "target_reuse_item_count": reuse_summary.item_count,
                                 "target_reuse_avg_item_score": reuse_summary.avg_item_score,
                                 "target_reuse_best_item_score": reuse_summary.best_item_score,
@@ -231,9 +237,12 @@ def main() -> None:
                                 "target_reuse_mismatched_prior_steps": reuse_summary.mismatched_prior_steps,
                                 "target_reuse_stalled_prior_steps": reuse_summary.stalled_prior_steps,
                                 "target_reuse_effect_mismatched_prior_steps": reuse_summary.effect_mismatched_prior_steps,
+                                "target_reuse_first_step_structural_evidence_count": reuse_summary.first_step_structural_evidence_count,
+                                "target_reuse_structural_evidence_steps": reuse_summary.structural_evidence_steps,
                                 "target_reuse_mismatch_abort_count": reuse_summary.mismatch_abort_count,
                                 "target_reuse_stall_abort_count": reuse_summary.stall_abort_count,
                                 "target_reuse_effect_abort_count": reuse_summary.effect_abort_count,
+                                "target_reuse_structural_abort_count": reuse_summary.structural_abort_count,
                                 "target_reuse_progress_lost_abort_count": reuse_summary.progress_lost_abort_count,
                                 "target_reuse_aborted_prior_count": reuse_summary.aborted_prior_count,
                                 "target_reuse_aborted_prior_steps": reuse_summary.aborted_prior_steps,
@@ -267,6 +276,7 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
         "mismatch_tolerance": args.reuse_mismatch_tolerance,
         "continuation_rule": getattr(args, "reuse_continuation_rule", "signature"),
         "stall_tolerance": getattr(args, "reuse_stall_tolerance", 0),
+        "structural_patience": getattr(args, "reuse_structural_patience", 2),
         "execution_mode": "default",
         "min_execution_support": 1,
         "allow_trace_priors": True,
@@ -297,8 +307,9 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             "effect_match_mode": "first_step",
             "min_execution_support": 2,
             "allow_trace_priors": False,
-            "continuation_rule": "effect_consistency",
+            "continuation_rule": "effect_structural_guard",
             "stall_tolerance": 0,
+            "structural_patience": getattr(args, "reuse_structural_patience", 2),
         }
     if method == "cyclic_subgoal_ecology_replay_pretrain":
         return {
@@ -311,6 +322,7 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             "allow_trace_priors": True,
             "continuation_rule": "progress_guard",
             "stall_tolerance": 1,
+            "structural_patience": getattr(args, "reuse_structural_patience", 2),
         }
     return base
 
@@ -344,6 +356,7 @@ def _report_row(
     row["target_reuse_mismatch_tolerance"] = ""
     row["target_reuse_continuation_rule"] = ""
     row["target_reuse_stall_tolerance"] = ""
+    row["target_reuse_structural_patience"] = ""
     row["target_reuse_item_count"] = ""
     row["target_reuse_avg_item_score"] = ""
     row["target_reuse_best_item_score"] = ""
@@ -361,12 +374,15 @@ def _report_row(
     row["target_reuse_first_step_mismatch_count"] = ""
     row["target_reuse_first_step_stall_count"] = ""
     row["target_reuse_first_step_effect_mismatch_count"] = ""
+    row["target_reuse_first_step_structural_evidence_count"] = ""
     row["target_reuse_mismatched_prior_steps"] = ""
     row["target_reuse_stalled_prior_steps"] = ""
     row["target_reuse_effect_mismatched_prior_steps"] = ""
+    row["target_reuse_structural_evidence_steps"] = ""
     row["target_reuse_mismatch_abort_count"] = ""
     row["target_reuse_stall_abort_count"] = ""
     row["target_reuse_effect_abort_count"] = ""
+    row["target_reuse_structural_abort_count"] = ""
     row["target_reuse_progress_lost_abort_count"] = ""
     row["target_reuse_aborted_prior_count"] = ""
     row["target_reuse_aborted_prior_steps"] = ""
