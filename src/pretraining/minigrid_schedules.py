@@ -221,7 +221,7 @@ def pretrain_cyclic_motif_fast_replay_agent(
         source_env=spec.env_id,
         seed=seed,
         population=[agent.clone() for agent in population],
-        hall_of_fame=[agent.clone() for agent in hall_of_fame] + [best.clone()],
+        hall_of_fame=[best.clone(), *[agent.clone() for agent in hall_of_fame]],
         metadata={
             "pretrain_episodes": episodes,
             "population_size": population_size,
@@ -352,7 +352,7 @@ def pretrain_cyclic_subgoal_ecology_replay_agent(
         source_env=spec.env_id,
         seed=seed,
         population=[agent.clone() for agent in population],
-        hall_of_fame=[agent.clone() for agent in hall_of_fame] + [best.clone()],
+        hall_of_fame=[best.clone(), *[agent.clone() for agent in hall_of_fame]],
         metadata={
             "pretrain_episodes": episodes,
             "population_size": population_size,
