@@ -156,6 +156,7 @@ def test_run_episode_executes_matching_behavior_prior_before_agent_policy() -> N
             termination=signatures[-1],
             score=0.9,
             state_trace=(0, 1, 2),
+            signature_trace=tuple(signatures),
         )
     )
     execution_stats = PriorExecutionStats()
@@ -169,6 +170,7 @@ def test_run_episode_executes_matching_behavior_prior_before_agent_policy() -> N
         prior_library=library,
         prior_execute_prob=1.0,
         execute_max_actions=2,
+        abort_on_mismatch=True,
         execution_stats=execution_stats,
     )
 
@@ -177,6 +179,57 @@ def test_run_episode_executes_matching_behavior_prior_before_agent_policy() -> N
     assert execution_stats.matched_prior_count >= 1
     assert execution_stats.executed_prior_count == 1
     assert execution_stats.executed_prior_steps == 2
+
+
+def test_run_episode_aborts_prior_when_signature_mismatches() -> None:
+    env_signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1),
+        _signature(direction=1, last_action=2),
+        _signature(direction=1, last_action=0),
+    ]
+    prior_signatures = [
+        env_signatures[0],
+        env_signatures[1],
+        _signature(direction=0, last_action=2),
+        _signature(direction=0, last_action=0),
+    ]
+    env = _DummyEnv(env_signatures)
+    agent = QAgent(5, 3, np.random.default_rng(21))
+    agent.q[:, 0] = 4.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=prior_signatures[0],
+            action_trace=(1, 2, 2),
+            termination=prior_signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2, 3),
+            signature_trace=tuple(prior_signatures),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=3,
+        abort_on_mismatch=True,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [1, 2]
+    assert rollout.actions[2] == 0
+    assert execution_stats.executed_prior_count == 1
+    assert execution_stats.executed_prior_steps == 2
+    assert execution_stats.aborted_prior_count == 1
+    assert execution_stats.aborted_prior_steps == 1
 
 
 def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> None:

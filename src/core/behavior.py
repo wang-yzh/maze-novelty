@@ -15,6 +15,7 @@ class BehaviorPrior:
     source: str = "unknown"
     support: int = 1
     state_trace: tuple[int, ...] = ()
+    signature_trace: tuple[StateSignature, ...] = ()
 
     def matches(self, signature: StateSignature, mode: str = "strict") -> bool:
         return self.initiation.matches(signature, mode=mode)
@@ -46,6 +47,7 @@ class BehaviorLibrary:
                 source=existing.source,
                 support=support,
                 state_trace=representative.state_trace,
+                signature_trace=representative.signature_trace,
             )
             self._trim()
             return

@@ -62,6 +62,8 @@ SUMMARY_METRICS = [
     "target_reuse_matched_prior_count",
     "target_reuse_executed_prior_count",
     "target_reuse_executed_prior_steps",
+    "target_reuse_aborted_prior_count",
+    "target_reuse_aborted_prior_steps",
     "target_reuse_executed_episode_count",
     "target_reuse_idle_episode_count",
     "target_reuse_executed_episode_avg_subgoal_score",
@@ -96,6 +98,7 @@ def main() -> None:
     parser.add_argument("--methods", default=DEFAULT_METHODS)
     parser.add_argument("--include-target-reuse", action="store_true")
     parser.add_argument("--reuse-match-modes", default="strict")
+    parser.add_argument("--reuse-abort-on-mismatch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--reuse-probe-episodes", type=int, default=6)
     parser.add_argument("--reuse-reinforce-passes", type=int, default=4)
     parser.add_argument("--reuse-reward", type=float, default=0.075)
@@ -157,6 +160,7 @@ def main() -> None:
                         reuse_config = TargetReuseConfig(
                             probe_episodes=args.reuse_probe_episodes,
                             match_mode=reuse_match_mode,
+                            abort_on_mismatch=args.reuse_abort_on_mismatch,
                             reinforce_passes=args.reuse_reinforce_passes,
                             reward=args.reuse_reward,
                         )
@@ -181,6 +185,7 @@ def main() -> None:
                             reuse_probe,
                             {
                                 "target_reuse_match_mode": reuse_match_mode,
+                                "target_reuse_abort_on_mismatch": args.reuse_abort_on_mismatch,
                                 "target_reuse_item_count": reuse_summary.item_count,
                                 "target_reuse_avg_item_score": reuse_summary.avg_item_score,
                                 "target_reuse_best_item_score": reuse_summary.best_item_score,
@@ -189,6 +194,8 @@ def main() -> None:
                                 "target_reuse_matched_prior_count": reuse_summary.matched_prior_count,
                                 "target_reuse_executed_prior_count": reuse_summary.executed_prior_count,
                                 "target_reuse_executed_prior_steps": reuse_summary.executed_prior_steps,
+                                "target_reuse_aborted_prior_count": reuse_summary.aborted_prior_count,
+                                "target_reuse_aborted_prior_steps": reuse_summary.aborted_prior_steps,
                                 "target_reuse_executed_episode_count": reuse_summary.executed_episode_count,
                                 "target_reuse_idle_episode_count": reuse_summary.idle_episode_count,
                                 "target_reuse_executed_episode_avg_subgoal_score": reuse_summary.executed_episode_avg_subgoal_score,
@@ -233,6 +240,7 @@ def _report_row(
     row["target_probe_mobility"] = ""
     row["target_probe_success"] = ""
     row["target_reuse_match_mode"] = ""
+    row["target_reuse_abort_on_mismatch"] = ""
     row["target_reuse_item_count"] = ""
     row["target_reuse_avg_item_score"] = ""
     row["target_reuse_best_item_score"] = ""
@@ -241,6 +249,8 @@ def _report_row(
     row["target_reuse_matched_prior_count"] = ""
     row["target_reuse_executed_prior_count"] = ""
     row["target_reuse_executed_prior_steps"] = ""
+    row["target_reuse_aborted_prior_count"] = ""
+    row["target_reuse_aborted_prior_steps"] = ""
     row["target_reuse_executed_episode_count"] = ""
     row["target_reuse_idle_episode_count"] = ""
     row["target_reuse_executed_episode_avg_subgoal_score"] = ""

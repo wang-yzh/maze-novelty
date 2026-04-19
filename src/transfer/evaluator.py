@@ -8,6 +8,7 @@ from agents import QAgent, Rollout
 from core.behavior import BehaviorLibrary, BehaviorPrior
 from minigrid_adapter import MiniGridSpec, MiniGridTabularEnv
 from minigrid_diagnostics import analyze_rollout
+from minigrid_encoders import StateSignature
 from navigation_motifs import NavigationMotif, extract_navigation_motifs
 from pretraining.artifacts import PretrainArtifact
 from transfer.metrics import (
@@ -43,6 +44,7 @@ class TargetReuseConfig:
     early_fraction: float = 0.40
     execute_probability: float = 0.30
     execute_max_actions: int = 6
+    abort_on_mismatch: bool = True
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,8 @@ class TargetReuseSummary:
     matched_prior_count: int = 0
     executed_prior_count: int = 0
     executed_prior_steps: int = 0
+    aborted_prior_count: int = 0
+    aborted_prior_steps: int = 0
     executed_episode_count: int = 0
     idle_episode_count: int = 0
     executed_episode_avg_subgoal_score: float = 0.0
@@ -88,6 +92,8 @@ class PriorExecutionStats:
     matched_prior_count: int = 0
     executed_prior_count: int = 0
     executed_prior_steps: int = 0
+    aborted_prior_count: int = 0
+    aborted_prior_steps: int = 0
     executed_episode_count: int = 0
     idle_episode_count: int = 0
     executed_episode_subgoal_total: float = 0.0
@@ -96,6 +102,14 @@ class PriorExecutionStats:
     idle_episode_subgoal_total: float = 0.0
     idle_episode_region_transition_total: float = 0.0
     idle_episode_mobility_total: float = 0.0
+
+
+@dataclass
+class ActivePriorExecution:
+    prior: BehaviorPrior
+    remaining_actions: list[int]
+    remaining_signatures: list[StateSignature]
+    match_mode: str
 
 
 def pretrain_q_agent(
@@ -183,6 +197,8 @@ def evaluate_transfer_with_target_reuse(
         matched_prior_count=execution_stats.matched_prior_count,
         executed_prior_count=execution_stats.executed_prior_count,
         executed_prior_steps=execution_stats.executed_prior_steps,
+        aborted_prior_count=execution_stats.aborted_prior_count,
+        aborted_prior_steps=execution_stats.aborted_prior_steps,
         executed_episode_count=execution_stats.executed_episode_count,
         idle_episode_count=execution_stats.idle_episode_count,
         executed_episode_avg_subgoal_score=_average(
@@ -210,9 +226,10 @@ def evaluate_transfer_with_target_reuse(
             execution_stats.idle_episode_count,
         ),
     )
+    execution_mode = "abort" if reuse_config.abort_on_mismatch else "open_loop"
     return (
         TransferReport(
-            method=f"{artifact.method}+target_reuse[{reuse_config.match_mode}]",
+            method=f"{artifact.method}+target_reuse[{reuse_config.match_mode}|{execution_mode}]",
             source_env=artifact.source_env,
             target_env=target_spec.env_id,
             seed=seed,
@@ -293,6 +310,7 @@ def adapt_agent(
             prior_library=prior_library if use_priors else None,
             prior_execute_prob=active_reuse_config.execute_probability if active_reuse_config is not None else 0.0,
             execute_max_actions=active_reuse_config.execute_max_actions if active_reuse_config is not None else 0,
+            abort_on_mismatch=active_reuse_config.abort_on_mismatch if active_reuse_config is not None else False,
             execution_stats=episode_execution_stats if use_priors else None,
         )
         if use_priors:
@@ -428,6 +446,7 @@ def _behavior_prior_from_motif(
         score=max(0.0, min(1.0, score)),
         source="target_probe_navigation",
         state_trace=state_trace,
+        signature_trace=tuple(rollout.state_signatures[start : end + 1]),
     )
 
 
@@ -452,6 +471,7 @@ def _fallback_trace_prior(
         score=max(0.0, min(1.0, score)),
         source="target_probe_trace",
         state_trace=tuple(int(state) for state in rollout.states[: action_count + 1]),
+        signature_trace=tuple(rollout.state_signatures[: action_count + 1]),
     )
 
 
@@ -475,6 +495,8 @@ def _accumulate_execution_stats(
     aggregate.matched_prior_count += episode.matched_prior_count
     aggregate.executed_prior_count += episode.executed_prior_count
     aggregate.executed_prior_steps += episode.executed_prior_steps
+    aggregate.aborted_prior_count += episode.aborted_prior_count
+    aggregate.aborted_prior_steps += episode.aborted_prior_steps
 
 
 def _accumulate_episode_diagnostics(
@@ -525,6 +547,25 @@ def _reinforce_target_reuse(
             agent.update(state, action, reward + (0.25 if done else 0.0), next_state, done)
 
 
+def _make_active_prior_execution(
+    prior: BehaviorPrior,
+    execute_max_actions: int,
+    match_mode: str,
+) -> ActivePriorExecution | None:
+    limited_trace = list(int(action) for action in prior.action_trace[: max(1, execute_max_actions)])
+    if not limited_trace:
+        return None
+    expected_signatures = []
+    if len(prior.signature_trace) >= len(limited_trace) + 1:
+        expected_signatures = list(prior.signature_trace[1 : len(limited_trace) + 1])
+    return ActivePriorExecution(
+        prior=prior,
+        remaining_actions=limited_trace,
+        remaining_signatures=expected_signatures,
+        match_mode=match_mode,
+    )
+
+
 def _run_episode(
     env: MiniGridTabularEnv,
     agent: QAgent,
@@ -534,6 +575,7 @@ def _run_episode(
     prior_library: BehaviorLibrary | None = None,
     prior_execute_prob: float = 0.0,
     execute_max_actions: int = 0,
+    abort_on_mismatch: bool = False,
     execution_stats: PriorExecutionStats | None = None,
 ) -> Rollout:
     state = env.reset()
@@ -543,10 +585,17 @@ def _run_episode(
     actions = []
     rewards = []
     success = False
-    queued_actions: list[int] = []
+    active_prior: ActivePriorExecution | None = None
     while True:
-        if queued_actions:
-            action = queued_actions.pop(0)
+        step_prior: ActivePriorExecution | None = None
+        expected_signature = None
+        executing_prior = active_prior is not None and bool(active_prior.remaining_actions)
+        if executing_prior:
+            assert active_prior is not None
+            step_prior = active_prior
+            action = active_prior.remaining_actions.pop(0)
+            if active_prior.remaining_signatures:
+                expected_signature = active_prior.remaining_signatures.pop(0)
         else:
             matched_prior = None
             if prior_library is not None and prior_execute_prob > 0.0:
@@ -554,17 +603,38 @@ def _run_episode(
                 if matched_prior is not None and execution_stats is not None:
                     execution_stats.matched_prior_count += 1
             if matched_prior is not None and rng.random() < prior_execute_prob and matched_prior.action_trace:
-                limited_trace = matched_prior.action_trace[: max(1, execute_max_actions)]
-                action = int(limited_trace[0])
-                queued_actions.extend(int(candidate) for candidate in limited_trace[1:])
-                if execution_stats is not None:
-                    execution_stats.executed_prior_count += 1
-                    execution_stats.executed_prior_steps += len(limited_trace)
+                active_prior = _make_active_prior_execution(
+                    matched_prior,
+                    execute_max_actions,
+                    prior_library.match_mode if prior_library is not None else "strict",
+                )
+                if active_prior is not None:
+                    step_prior = active_prior
+                    action = active_prior.remaining_actions.pop(0)
+                    if active_prior.remaining_signatures:
+                        expected_signature = active_prior.remaining_signatures.pop(0)
+                    if execution_stats is not None:
+                        execution_stats.executed_prior_count += 1
+                else:
+                    action = agent.act(state, 0.0)
             elif rng.random() < epsilon:
                 action = int(rng.integers(env.n_actions))
             else:
                 action = agent.act(state, 0.0)
         next_state, reward, done, info = env.step(action)
+        if step_prior is not None and execution_stats is not None:
+            execution_stats.executed_prior_steps += 1
+        if step_prior is not None and expected_signature is not None:
+            mismatch = not expected_signature.matches(info["state_signature"], mode=step_prior.match_mode)
+            if mismatch and abort_on_mismatch:
+                if execution_stats is not None and step_prior.remaining_actions:
+                    execution_stats.aborted_prior_count += 1
+                    execution_stats.aborted_prior_steps += len(step_prior.remaining_actions)
+                active_prior = None
+            elif step_prior is not None and not step_prior.remaining_actions:
+                active_prior = None
+        elif step_prior is not None and not step_prior.remaining_actions:
+            active_prior = None
         if train:
             agent.update(state, action, reward, next_state, done)
         actions.append(action)
