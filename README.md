@@ -71,11 +71,21 @@ Outputs are written to `outputs/`:
 Current experiment report:
 
 - `docs/experiment_report.md`
+- `docs/version_history.md`
+- `docs/pretraining_transfer_framework.md`
 
 Versioning notes:
 
 - `docs/versioning.md`
 - `docs/framework_upgrade_plan.md`
+
+Quality checks:
+
+```bash
+uv run ruff check src scripts tests
+uv run pyright src scripts
+uv run pytest
+```
 
 The experiment is intentionally small and dependency-light. It is meant to test
 whether the training loop produces useful behavior before moving to larger

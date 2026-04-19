@@ -45,8 +45,9 @@ Create a commit after each coherent experimental state:
 ## Before A Run
 
 ```bash
-uv run ruff check src scripts
+uv run ruff check src scripts tests
 uv run pyright src scripts
+uv run pytest
 uv run python scripts/check_env.py
 ```
 
