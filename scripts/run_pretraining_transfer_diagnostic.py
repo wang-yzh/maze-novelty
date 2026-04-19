@@ -91,6 +91,13 @@ SUMMARY_METRICS = [
     "target_reuse_idle_episode_avg_subgoal_score",
     "target_reuse_idle_episode_avg_region_transitions",
     "target_reuse_idle_episode_avg_mobility",
+    "target_reuse_composition_outcome_count",
+    "target_reuse_composition_region_change_count",
+    "target_reuse_composition_goal_visible_end_count",
+    "target_reuse_composition_goal_visibility_gain_count",
+    "target_reuse_composition_avg_displacement",
+    "target_reuse_composition_max_displacement",
+    "target_reuse_composition_avg_signature_progress_delta",
     "target_reuse_probe_success",
 ]
 
@@ -267,6 +274,13 @@ def main() -> None:
                                 "target_reuse_idle_episode_avg_subgoal_score": reuse_summary.idle_episode_avg_subgoal_score,
                                 "target_reuse_idle_episode_avg_region_transitions": reuse_summary.idle_episode_avg_region_transitions,
                                 "target_reuse_idle_episode_avg_mobility": reuse_summary.idle_episode_avg_mobility,
+                                "target_reuse_composition_outcome_count": reuse_summary.composition_outcome_count,
+                                "target_reuse_composition_region_change_count": reuse_summary.composition_region_change_count,
+                                "target_reuse_composition_goal_visible_end_count": reuse_summary.composition_goal_visible_end_count,
+                                "target_reuse_composition_goal_visibility_gain_count": reuse_summary.composition_goal_visibility_gain_count,
+                                "target_reuse_composition_avg_displacement": reuse_summary.composition_avg_displacement,
+                                "target_reuse_composition_max_displacement": reuse_summary.composition_max_displacement,
+                                "target_reuse_composition_avg_signature_progress_delta": reuse_summary.composition_avg_signature_progress_delta,
                                 "target_reuse_prior_kind_stats_json": reuse_summary.prior_kind_stats_json,
                                 "target_reuse_probe_success": reuse_summary.probe_success_rate,
                             },
@@ -414,6 +428,13 @@ def _report_row(
     row["target_reuse_idle_episode_avg_subgoal_score"] = ""
     row["target_reuse_idle_episode_avg_region_transitions"] = ""
     row["target_reuse_idle_episode_avg_mobility"] = ""
+    row["target_reuse_composition_outcome_count"] = ""
+    row["target_reuse_composition_region_change_count"] = ""
+    row["target_reuse_composition_goal_visible_end_count"] = ""
+    row["target_reuse_composition_goal_visibility_gain_count"] = ""
+    row["target_reuse_composition_avg_displacement"] = ""
+    row["target_reuse_composition_max_displacement"] = ""
+    row["target_reuse_composition_avg_signature_progress_delta"] = ""
     row["target_reuse_prior_kind_stats_json"] = ""
     row["target_reuse_probe_success"] = ""
     if target_probe is not None:

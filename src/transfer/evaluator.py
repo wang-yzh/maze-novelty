@@ -112,6 +112,13 @@ class TargetReuseSummary:
     idle_episode_avg_subgoal_score: float = 0.0
     idle_episode_avg_region_transitions: float = 0.0
     idle_episode_avg_mobility: float = 0.0
+    composition_outcome_count: int = 0
+    composition_region_change_count: int = 0
+    composition_goal_visible_end_count: int = 0
+    composition_goal_visibility_gain_count: int = 0
+    composition_avg_displacement: float = 0.0
+    composition_max_displacement: int = 0
+    composition_avg_signature_progress_delta: float = 0.0
 
 
 @dataclass
@@ -136,6 +143,13 @@ class PriorKindStats:
     progress_lost_abort_count: int = 0
     aborted_prior_count: int = 0
     aborted_prior_steps: int = 0
+    composition_outcome_count: int = 0
+    composition_region_change_count: int = 0
+    composition_goal_visible_end_count: int = 0
+    composition_goal_visibility_gain_count: int = 0
+    composition_displacement_total: int = 0
+    composition_max_displacement: int = 0
+    composition_signature_progress_delta_total: float = 0.0
 
 
 @dataclass
@@ -168,6 +182,13 @@ class PriorExecutionStats:
     idle_episode_subgoal_total: float = 0.0
     idle_episode_region_transition_total: float = 0.0
     idle_episode_mobility_total: float = 0.0
+    composition_outcome_count: int = 0
+    composition_region_change_count: int = 0
+    composition_goal_visible_end_count: int = 0
+    composition_goal_visibility_gain_count: int = 0
+    composition_displacement_total: int = 0
+    composition_max_displacement: int = 0
+    composition_signature_progress_delta_total: float = 0.0
     kind_stats: dict[str, PriorKindStats] = field(default_factory=dict)
 
 
@@ -179,6 +200,7 @@ class ActivePriorExecution:
     remaining_effects: list[str]
     match_mode: str
     start_position: tuple[int, int]
+    start_signature: StateSignature
     consecutive_mismatches: int = 0
     consecutive_stalls: int = 0
     consecutive_effect_mismatches: int = 0
@@ -326,6 +348,19 @@ def evaluate_transfer_with_target_reuse(
         idle_episode_avg_mobility=_average(
             execution_stats.idle_episode_mobility_total,
             execution_stats.idle_episode_count,
+        ),
+        composition_outcome_count=execution_stats.composition_outcome_count,
+        composition_region_change_count=execution_stats.composition_region_change_count,
+        composition_goal_visible_end_count=execution_stats.composition_goal_visible_end_count,
+        composition_goal_visibility_gain_count=execution_stats.composition_goal_visibility_gain_count,
+        composition_avg_displacement=_average(
+            execution_stats.composition_displacement_total,
+            execution_stats.composition_outcome_count,
+        ),
+        composition_max_displacement=execution_stats.composition_max_displacement,
+        composition_avg_signature_progress_delta=_average(
+            execution_stats.composition_signature_progress_delta_total,
+            execution_stats.composition_outcome_count,
         ),
         prior_kind_stats_json=_prior_kind_stats_json(execution_stats),
     )
@@ -665,6 +700,16 @@ def _accumulate_execution_stats(
     aggregate.progress_lost_abort_count += episode.progress_lost_abort_count
     aggregate.aborted_prior_count += episode.aborted_prior_count
     aggregate.aborted_prior_steps += episode.aborted_prior_steps
+    aggregate.composition_outcome_count += episode.composition_outcome_count
+    aggregate.composition_region_change_count += episode.composition_region_change_count
+    aggregate.composition_goal_visible_end_count += episode.composition_goal_visible_end_count
+    aggregate.composition_goal_visibility_gain_count += episode.composition_goal_visibility_gain_count
+    aggregate.composition_displacement_total += episode.composition_displacement_total
+    aggregate.composition_max_displacement = max(
+        aggregate.composition_max_displacement,
+        episode.composition_max_displacement,
+    )
+    aggregate.composition_signature_progress_delta_total += episode.composition_signature_progress_delta_total
     for kind, source in episode.kind_stats.items():
         target = _kind_stats(aggregate, kind)
         _accumulate_prior_kind_stats(target, source)
@@ -721,6 +766,16 @@ def _accumulate_prior_kind_stats(target: PriorKindStats, source: PriorKindStats)
     target.progress_lost_abort_count += source.progress_lost_abort_count
     target.aborted_prior_count += source.aborted_prior_count
     target.aborted_prior_steps += source.aborted_prior_steps
+    target.composition_outcome_count += source.composition_outcome_count
+    target.composition_region_change_count += source.composition_region_change_count
+    target.composition_goal_visible_end_count += source.composition_goal_visible_end_count
+    target.composition_goal_visibility_gain_count += source.composition_goal_visibility_gain_count
+    target.composition_displacement_total += source.composition_displacement_total
+    target.composition_max_displacement = max(
+        target.composition_max_displacement,
+        source.composition_max_displacement,
+    )
+    target.composition_signature_progress_delta_total += source.composition_signature_progress_delta_total
 
 
 def _item_kind_counts_json(items: list[TargetReuseItem]) -> str:
@@ -738,7 +793,7 @@ def _prior_kind_stats_json(stats: PriorExecutionStats) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def _prior_kind_stats_dict(stats: PriorKindStats) -> dict[str, int]:
+def _prior_kind_stats_dict(stats: PriorKindStats) -> dict[str, float | int]:
     return {
         "matched": stats.matched_prior_count,
         "started": stats.executed_prior_count,
@@ -760,6 +815,19 @@ def _prior_kind_stats_dict(stats: PriorKindStats) -> dict[str, int]:
         "effect_aborts": stats.effect_abort_count,
         "structural_aborts": stats.structural_abort_count,
         "progress_lost_aborts": stats.progress_lost_abort_count,
+        "composition_outcomes": stats.composition_outcome_count,
+        "region_changes": stats.composition_region_change_count,
+        "goal_visible_ends": stats.composition_goal_visible_end_count,
+        "goal_visibility_gains": stats.composition_goal_visibility_gain_count,
+        "avg_displacement": _average(
+            stats.composition_displacement_total,
+            stats.composition_outcome_count,
+        ),
+        "max_displacement": stats.composition_max_displacement,
+        "avg_signature_progress_delta": _average(
+            stats.composition_signature_progress_delta_total,
+            stats.composition_outcome_count,
+        ),
     }
 
 
@@ -816,6 +884,7 @@ def _make_active_prior_execution(
     execute_max_actions: int,
     match_mode: str,
     start_position: tuple[int, int],
+    start_signature: StateSignature,
 ) -> ActivePriorExecution | None:
     limited_trace = list(int(action) for action in prior.action_trace[: max(1, execute_max_actions)])
     if not limited_trace:
@@ -833,6 +902,7 @@ def _make_active_prior_execution(
         remaining_effects=expected_effects,
         match_mode=match_mode,
         start_position=start_position,
+        start_signature=start_signature,
     )
 
 
@@ -893,6 +963,19 @@ def _has_kind_structural_evidence(
 
 def _is_passable_local_category(category: int) -> bool:
     return category in (0, 2)
+
+
+def _signature_progress_value(signature: StateSignature) -> float:
+    topology_value = {
+        0: 0.00,
+        1: 0.20,
+        2: 0.35,
+        3: 0.25,
+        4: 0.10,
+    }.get(signature.topology, 0.0)
+    goal_value = 1.0 if signature.goal_bin != 4 else 0.0
+    front_value = 0.10 if _is_passable_local_category(signature.local_shape[0]) else 0.0
+    return goal_value + topology_value + front_value
 
 
 def _uses_semantic_prior_execution(execution_mode: str, prior: BehaviorPrior) -> bool:
@@ -1254,14 +1337,26 @@ def _record_prior_step_assessment(
             kind_stats.first_step_structural_evidence_count += 1
 
 
-def _record_prior_completion(stats: PriorExecutionStats, step_prior: ActivePriorExecution) -> None:
+def _record_prior_completion(
+    stats: PriorExecutionStats,
+    step_prior: ActivePriorExecution,
+    end_position: tuple[int, int],
+    end_signature: StateSignature,
+) -> None:
     stats.completed_prior_count += 1
     _kind_stats(stats, step_prior.prior.kind).completed_prior_count += 1
+    _record_prior_composition_outcome(stats, step_prior, end_position, end_signature)
 
 
-def _record_prior_truncation(stats: PriorExecutionStats, step_prior: ActivePriorExecution) -> None:
+def _record_prior_truncation(
+    stats: PriorExecutionStats,
+    step_prior: ActivePriorExecution,
+    end_position: tuple[int, int],
+    end_signature: StateSignature,
+) -> None:
     stats.truncated_prior_count += 1
     _kind_stats(stats, step_prior.prior.kind).truncated_prior_count += 1
+    _record_prior_composition_outcome(stats, step_prior, end_position, end_signature)
 
 
 def _record_prior_abort(
@@ -1269,6 +1364,8 @@ def _record_prior_abort(
     step_prior: ActivePriorExecution,
     abort_reason: str,
     aborted_steps: int,
+    end_position: tuple[int, int],
+    end_signature: StateSignature,
 ) -> None:
     kind_stats = _kind_stats(stats, step_prior.prior.kind)
     stats.aborted_prior_count += 1
@@ -1293,6 +1390,39 @@ def _record_prior_abort(
     elif abort_reason:
         msg = f"Unknown prior abort reason: {abort_reason}"
         raise ValueError(msg)
+    _record_prior_composition_outcome(stats, step_prior, end_position, end_signature)
+
+
+def _record_prior_composition_outcome(
+    stats: PriorExecutionStats,
+    step_prior: ActivePriorExecution,
+    end_position: tuple[int, int],
+    end_signature: StateSignature,
+) -> None:
+    kind_stats = _kind_stats(stats, step_prior.prior.kind)
+    displacement = _manhattan_distance(step_prior.start_position, end_position)
+    region_changed = _position_region(step_prior.start_position) != _position_region(end_position)
+    goal_visible_end = end_signature.goal_bin != 4
+    goal_visibility_gain = step_prior.start_signature.goal_bin == 4 and goal_visible_end
+    progress_delta = _signature_progress_value(end_signature) - _signature_progress_value(step_prior.start_signature)
+
+    stats.composition_outcome_count += 1
+    kind_stats.composition_outcome_count += 1
+    stats.composition_displacement_total += displacement
+    kind_stats.composition_displacement_total += displacement
+    stats.composition_max_displacement = max(stats.composition_max_displacement, displacement)
+    kind_stats.composition_max_displacement = max(kind_stats.composition_max_displacement, displacement)
+    stats.composition_signature_progress_delta_total += progress_delta
+    kind_stats.composition_signature_progress_delta_total += progress_delta
+    if region_changed:
+        stats.composition_region_change_count += 1
+        kind_stats.composition_region_change_count += 1
+    if goal_visible_end:
+        stats.composition_goal_visible_end_count += 1
+        kind_stats.composition_goal_visible_end_count += 1
+    if goal_visibility_gain:
+        stats.composition_goal_visibility_gain_count += 1
+        kind_stats.composition_goal_visibility_gain_count += 1
 
 
 def _select_prior_for_execution(
@@ -1380,6 +1510,7 @@ def _run_episode(
                     execute_max_actions,
                     prior_library.match_mode if prior_library is not None else "strict",
                     env.position,
+                    env.state_signature,
                 )
                 if active_prior is not None:
                     step_prior = active_prior
@@ -1423,11 +1554,18 @@ def _run_episode(
                         step_prior,
                         assessment.abort_reason,
                         len(step_prior.remaining_actions),
+                        info["position"],
+                        info["state_signature"],
                     )
                 active_prior = None
             elif step_prior is not None and not step_prior.remaining_actions:
                 if execution_stats is not None:
-                    _record_prior_completion(execution_stats, step_prior)
+                    _record_prior_completion(
+                        execution_stats,
+                        step_prior,
+                        info["position"],
+                        info["state_signature"],
+                    )
                 active_prior = None
         if train:
             agent.update(state, action, reward, next_state, done)
@@ -1440,7 +1578,12 @@ def _run_episode(
         success = bool(info["success"])
         if done:
             if active_prior is not None and active_prior.remaining_actions and execution_stats is not None:
-                _record_prior_truncation(execution_stats, active_prior)
+                _record_prior_truncation(
+                    execution_stats,
+                    active_prior,
+                    info["position"],
+                    info["state_signature"],
+                )
             break
     return Rollout(
         states,

@@ -502,6 +502,31 @@ The action-trace representation was a real bottleneck. Semantic execution can
 turn fragile priors into sustained local behavior, but the next unsolved problem
 is composition: movement has to become solved episodes.
 
+### Untagged: `semantic composition diagnostics`
+
+Added:
+
+- composition outcome tracking for completed, aborted, and truncated priors;
+- aggregate CSV metrics for region changes, goal visibility gains, displacement,
+  and signature progress delta;
+- per-kind composition metrics inside `target_reuse_prior_kind_stats_json`.
+
+Result:
+
+Semantic priors clearly create local movement and region changes, but this quick
+run produced no goal visibility gains:
+
+```text
+N4-S5 motif: 97 outcomes, 25 region changes, 0 goal gains
+N4-S5 ecology: 88 outcomes, 35 region changes, 0 goal gains
+```
+
+Lesson:
+
+The bottleneck has moved from execution to composition. Semantic priors can
+move through structure, but they are not yet target-directed enough to create
+solved episodes.
+
 ## Current State
 
 Current branch:

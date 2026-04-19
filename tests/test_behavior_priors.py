@@ -544,6 +544,57 @@ def test_semantic_region_transition_moves_forward_when_front_is_open() -> None:
     assert execution_stats.kind_stats["region_transition"].structural_evidence_steps == 2
 
 
+def test_prior_composition_records_region_change_and_goal_gain() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3, goal_bin=4, local_shape=(0, 1, 1, 1, 1)),
+        _signature(direction=0, last_action=2, goal_bin=1, local_shape=(0, 1, 1, 1, 1)),
+    ]
+    env = _DummyEnv(signatures, positions=[(0, 3), (0, 4)])
+    agent = QAgent(3, 3, np.random.default_rng(11))
+    agent.q[:, 0] = 5.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="region_transition",
+            initiation=signatures[0],
+            action_trace=(2,),
+            termination=signatures[-1],
+            score=0.9,
+            state_trace=(0, 1),
+            signature_trace=tuple(signatures),
+            effect_trace=("forward_move",),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    _run_episode(
+        env,
+        agent,
+        np.random.default_rng(5),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        execution_mode="semantic_intents",
+        prior_execute_prob=1.0,
+        execute_max_actions=1,
+        abort_on_mismatch=True,
+        continuation_rule="kind_structural_guard",
+        execution_stats=execution_stats,
+    )
+
+    kind_stats = execution_stats.kind_stats["region_transition"]
+    assert execution_stats.composition_outcome_count == 1
+    assert execution_stats.composition_region_change_count == 1
+    assert execution_stats.composition_goal_visible_end_count == 1
+    assert execution_stats.composition_goal_visibility_gain_count == 1
+    assert execution_stats.composition_displacement_total == 1
+    assert execution_stats.composition_max_displacement == 1
+    assert execution_stats.composition_signature_progress_delta_total > 0
+    assert kind_stats.composition_outcome_count == 1
+    assert kind_stats.composition_region_change_count == 1
+    assert kind_stats.composition_goal_visibility_gain_count == 1
+
+
 def test_run_episode_aborts_prior_when_signature_mismatches() -> None:
     env_signatures = [
         _signature(direction=0, last_action=3),
