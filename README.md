@@ -1,100 +1,237 @@
 # Maze Novelty
 
-This is a small experimental playground for staged novelty exploration in a
-12x12 GridWorld.
+Maze Novelty is an experimental research repo for cyclic novelty, replay, motif
+memory, and transfer in small GridWorld and MiniGrid tasks.
 
-The first version compares four methods:
+The project started as a maze-solving playground, but its current purpose is
+more specific:
 
-- `q_learning`: ordinary Q-learning.
-- `novelty_q`: Q-learning with a novelty bonus.
-- `genetic_q`: population-based Q-learning with mutation/crossover.
-- `cyclic_novelty`: cyclic novelty cultivation followed by exploitation.
+```text
+find evolutionary training cycles that create useful pretraining artifacts
+for future adaptation
+```
 
-Setup:
+The long-term target is not "win this one maze." The long-term target is a
+learning system that can:
+
+- pretrain on one environment family;
+- export inherited structure;
+- adapt faster on a new environment;
+- keep evolving without collapsing into task-specific tricks.
+
+## Current Focus
+
+The active research frame is:
+
+```text
+pretrain artifact
+-> target probe
+-> target-side reuse / behavior prior
+-> adaptation metrics
+```
+
+The current branch adds a first executable behavior-prior scaffold:
+
+- structural `StateSignature` matching;
+- short `BehaviorPrior` objects derived from navigation motifs;
+- early adaptation prior execution in addition to trace reinforcement;
+- execution diagnostics for matched priors, executed priors, and executed
+  episode structure.
+
+The latest writeup for that step is:
+
+- `docs/v1.4.7_behavior_prior_transfer.md`
+
+## Main Method Families
+
+The repo has accumulated several related method families. The most important
+recent ones are:
+
+| Method | Role |
+| --- | --- |
+| `cyclic_operate_replay` | clean pretraining baseline with simple replay |
+| `cyclic_motif_fast_replay` | success-fragment branch with speed discipline |
+| `cyclic_subgoal_ecology_replay` | failure-memory branch for sparse tasks |
+| `+target_reuse` transfer path | target-side trace/prior reuse during adaptation |
+
+These should be compared by transfer usefulness, not only by source-task score.
+
+## Repository Layout
+
+```text
+src/
+  core/           shared experiment utilities and behavior-prior types
+  pretraining/    artifact builders and source-side schedules
+  transfer/       target-side evaluation and adaptation metrics
+  minigrid_*      MiniGrid adapter, encoders, training, diagnostics
+  train.py        older GridWorld training entrypoint
+
+scripts/
+  benchmark, diagnostic, and summarization entrypoints
+
+configs/
+  small GridWorld presets
+
+docs/
+  versioned writeups, plans, experiment notes, and handoff docs
+```
+
+## Quick Start
+
+Install dependencies:
 
 ```bash
 uv sync
 ```
 
-Environment check without training:
+Sanity-check the environment:
 
 ```bash
 uv run python src/train.py --config configs/quick.toml --dry-run
 uv run python scripts/check_env.py
 ```
 
-Quick smoke run:
+## Common Commands
+
+GridWorld smoke run:
 
 ```bash
 uv run python src/train.py --config configs/quick.toml --no-plots
 ```
 
-Plot smoke run:
+MiniGrid benchmark smoke:
 
 ```bash
-uv run python src/train.py --config configs/plot_smoke.toml
+uv run python scripts/run_minigrid_benchmark.py \
+  --env-id MiniGrid-FourRooms-v0 \
+  --name fourrooms_pilot
 ```
 
-Full default run:
+Transfer diagnostic:
 
 ```bash
-uv run python src/train.py --config configs/default.toml
+uv run python scripts/run_pretraining_transfer_diagnostic.py \
+  --seeds 7,17,27 \
+  --pretrain-episodes 40 \
+  --adapt-episodes 30 \
+  --eval-every 10 \
+  --eval-episodes 4 \
+  --output outputs/pretraining_transfer_diagnostic_v1.csv \
+  --summary-output outputs/pretraining_transfer_diagnostic_v1_summary.csv
 ```
 
-Hard run:
+Behavior-prior quick probe:
 
 ```bash
-uv run python src/train.py --config configs/hard.toml
+uv run python scripts/run_pretraining_transfer_diagnostic.py \
+  --seeds 7 \
+  --target-envs MiniGrid-MultiRoom-N2-S4-v0,MiniGrid-MultiRoom-N4-S5-v0 \
+  --pretrain-episodes 20 \
+  --adapt-episodes 20 \
+  --eval-every 10 \
+  --eval-episodes 3 \
+  --include-target-reuse \
+  --output outputs/pretraining_behavior_prior_probe.csv \
+  --summary-output outputs/pretraining_behavior_prior_probe_summary.csv
 ```
 
-MiniGrid FourRooms pilot:
+## Quality Checks
 
-```bash
-uv run python scripts/run_minigrid_benchmark.py --env-id MiniGrid-FourRooms-v0 --name fourrooms_pilot
-```
-
-MiniGrid benchmark plan:
-
-- `docs/minigrid_benchmark_plan.md`
-- `docs/explore_operate_benchmark_plan.md`
-
-Frozen result checkpoints:
-
-- `docs/v0.3_frozen_result.md`
-
-Outputs are written to `outputs/`:
-
-- `metrics.csv`
-- `summary.png`
-- `paths.png`
-
-Current experiment report:
-
-- `docs/experiment_report.md`
-- `docs/version_history.md`
-- `docs/pretraining_transfer_framework.md`
-- `docs/v1.4.7_behavior_prior_transfer.md`
-
-Versioning notes:
-
-- `docs/versioning.md`
-- `docs/framework_upgrade_plan.md`
-
-Quality checks:
+Run these before treating a local state as a version candidate:
 
 ```bash
 uv run ruff check src scripts tests
 uv run pyright src scripts
 uv run pytest
+uv run python scripts/check_env.py
 ```
 
-The experiment is intentionally small and dependency-light. It is meant to test
-whether the training loop produces useful behavior before moving to larger
-environments.
+## Key Documents
 
-Notes:
+Start here if you want the project story in order:
 
-- `configs/quick.toml` is for checking that the environment and imports work.
-- `configs/default.toml` is the first real experiment preset.
-- Matplotlib and font caches are redirected into project-local cache folders to
-  avoid writing into user-level cache directories.
+- `docs/version_history.md`
+  Historical record of the major tags and lessons.
+- `docs/pretraining_transfer_framework.md`
+  The current central research framing.
+- `docs/v1.4.7_behavior_prior_transfer.md`
+  The current behavior-prior transfer scaffold and probe result.
+- `docs/task_suite_plan.md`
+  Why FourRooms stopped being enough and how the task ladder evolved.
+- `docs/theory_structural_novelty_and_options.md`
+  Theory note connecting novelty, reusable transitions, and options.
+- `docs/handoff_2026-04-19_behavior_prior_transfer.md`
+  Maintainer handoff for the current public branch state.
+- `docs/versioning.md`
+  The repo's versioning and publishing discipline.
+
+## Outputs
+
+Generated artifacts stay local under `outputs/`. The repo intentionally does
+not track benchmark CSVs or plots, except for `outputs/README.md`.
+
+Typical outputs include:
+
+- `metrics.csv`
+- `summary.csv`
+- `summary.png`
+- `paths.png`
+
+Stable conclusions should be promoted into `docs/`, not committed from
+`outputs/`.
+
+## Versioning Discipline
+
+This repo uses small, explicit research checkpoints instead of long-lived
+unstructured drift.
+
+The usual sequence is:
+
+```text
+single mechanism change
+-> checks
+-> focused run
+-> written interpretation
+-> commit or tag
+```
+
+The public GitHub repo includes all historical tags up to:
+
+```text
+v1.4.6-version-history-and-tests
+```
+
+The current post-tag work lives on:
+
+```text
+experiment/behavior-prior-transfer
+```
+
+## Current Status
+
+What is true right now:
+
+- the public repo is live at `wang-yzh/maze-novelty`;
+- the current branch has an executable behavior-prior scaffold;
+- target-side priors can be extracted, merged, matched, and executed;
+- transfer success is still unresolved;
+- the next clean question is whether executed-prior episodes improve structure
+  consistently across more seeds.
+
+What should not be claimed yet:
+
+- that behavior priors already solve MultiRoom;
+- that a final winning pretraining cycle has been found;
+- that item count alone is evidence of transfer quality.
+
+## Short Thesis
+
+The repo is best understood this way:
+
+```text
+Novelty creates variation.
+Selection keeps useful variation.
+Memory stores useful traces.
+Behavior priors try to make traces inheritable.
+Transfer tests whether inherited structure improves future adaptation.
+```
