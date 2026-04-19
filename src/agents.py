@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from env import GridWorld
+from minigrid_encoders import StateSignature
 
 
 @dataclass
@@ -16,6 +17,7 @@ class Rollout:
     success: bool
     steps: int
     total_reward: float
+    state_signatures: list[StateSignature] = field(default_factory=list)
 
 
 class QAgent:

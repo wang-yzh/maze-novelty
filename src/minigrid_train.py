@@ -1853,6 +1853,7 @@ def _run_minigrid_episode(
     state = env.reset()
     states = [state]
     positions = [env.position]
+    state_signatures = [env.state_signature]
     actions = []
     rewards = []
     success = False
@@ -1873,13 +1874,23 @@ def _run_minigrid_episode(
         rewards.append(reward)
         states.append(next_state)
         positions.append(info["position"])
+        state_signatures.append(info["state_signature"])
         visited.add(info["position"])
         previous_action = action
         state = next_state
         success = bool(info["success"])
         if done:
             break
-    return Rollout(states, positions, actions, rewards, success, len(actions), float(np.sum(rewards)))
+    return Rollout(
+        states,
+        positions,
+        actions,
+        rewards,
+        success,
+        len(actions),
+        float(np.sum(rewards)),
+        state_signatures=state_signatures,
+    )
 
 
 def _run_action_sequence(args, env, actions, generation, episode) -> Rollout:
@@ -1887,6 +1898,7 @@ def _run_action_sequence(args, env, actions, generation, episode) -> Rollout:
     state = env.reset()
     states = [state]
     positions = [env.position]
+    state_signatures = [env.state_signature]
     taken_actions = []
     rewards = []
     success = False
@@ -1897,6 +1909,7 @@ def _run_action_sequence(args, env, actions, generation, episode) -> Rollout:
         rewards.append(reward)
         states.append(next_state)
         positions.append(info["position"])
+        state_signatures.append(info["state_signature"])
         state = next_state
         success = bool(info["success"])
         if done:
@@ -1908,11 +1921,21 @@ def _run_action_sequence(args, env, actions, generation, episode) -> Rollout:
         rewards.append(reward)
         states.append(next_state)
         positions.append(info["position"])
+        state_signatures.append(info["state_signature"])
         state = next_state
         success = bool(info["success"])
         if done:
             break
-    return Rollout(states, positions, taken_actions, rewards, success, len(taken_actions), float(np.sum(rewards)))
+    return Rollout(
+        states,
+        positions,
+        taken_actions,
+        rewards,
+        success,
+        len(taken_actions),
+        float(np.sum(rewards)),
+        state_signatures=state_signatures,
+    )
 
 
 def _evaluate_minigrid(args, agent, rng, eval_episodes=None):

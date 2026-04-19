@@ -425,12 +425,37 @@ The project needed a consolidation checkpoint. Before adding more mechanisms,
 the historical record and minimal reproducibility checks had to catch up with
 the pace of experimentation.
 
+### Untagged: `behavior prior transfer scaffold`
+
+Added:
+
+- `StateSignature` for MiniGrid transfer-time structure matching;
+- `BehaviorPrior` and `BehaviorLibrary`;
+- target-side navigation prior extraction;
+- early adaptation prior execution in addition to trace reinforcement;
+- execution diagnostics for matched and executed priors.
+
+Result:
+
+Quick probe runs on `N2-S4` and `N4-S5` remained zero-success, but the new
+executor was no longer silent: matched-prior counts, executed-prior counts, and
+executed-prior steps were all substantial for the stronger source artifacts.
+
+Lesson:
+
+The bottleneck moved one step deeper again:
+
+```text
+not "can target-side priors be executed?"
+but "how should executed priors change adaptation dynamics enough to create success?"
+```
+
 ## Current State
 
 Current branch:
 
 ```text
-experiment/framework-upgrade
+experiment/behavior-prior-transfer
 ```
 
 Current latest tag:
@@ -456,6 +481,9 @@ Current strongest historical ideas:
 4. Target-side behavior probes reveal differences that final score hides.
 5. Trace replay alone is too weak; future work should test options, behavior
    priors, and subgoal-conditioned exploration.
+6. Behavior-prior execution can now be observed directly; future work should
+   measure whether executed priors improve mobility, transitions, or adaptation
+   speed rather than only whether they exist.
 
 ## Recommended Next Direction
 
@@ -474,5 +502,6 @@ transfer metrics
 The next serious algorithmic question is:
 
 ```text
-How should target-side reusable traces be executed, composed, or used as priors?
+How should executed target-side priors change adaptation dynamics enough to
+create transferable success?
 ```

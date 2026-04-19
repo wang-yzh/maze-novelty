@@ -1,9 +1,30 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 import numpy as np
 from minigrid.core.constants import OBJECT_TO_IDX
+
+
+@dataclass(frozen=True)
+class StateSignature:
+    direction: int
+    local_shape: tuple[int, int, int, int, int]
+    goal_bin: int
+    topology: int
+    last_action: int
+
+    def matches(self, other: "StateSignature") -> bool:
+        goal_compatible = self.goal_bin == other.goal_bin or self.goal_bin == 4 or other.goal_bin == 4
+        action_compatible = self.last_action == other.last_action or self.last_action == 3 or other.last_action == 3
+        return (
+            self.direction == other.direction
+            and self.local_shape == other.local_shape
+            and self.topology == other.topology
+            and action_compatible
+            and goal_compatible
+        )
 
 
 class MiniGridStateEncoder(Protocol):
@@ -11,6 +32,9 @@ class MiniGridStateEncoder(Protocol):
 
     @property
     def n_states(self) -> int:
+        ...
+
+    def signature(self, obs: dict, carrying: bool, last_action: int) -> StateSignature:
         ...
 
     def encode(self, obs: dict, carrying: bool, last_action: int) -> int:
@@ -23,6 +47,9 @@ class MiniGridCompactEncoder:
     @property
     def n_states(self) -> int:
         return 4 * 11 * 11 * 11 * 2 * 2 * 2 * 2 * 2
+
+    def signature(self, obs: dict, carrying: bool, last_action: int) -> StateSignature:
+        return _state_signature(obs, last_action)
 
     def encode(self, obs: dict, carrying: bool, last_action: int) -> int:
         image = obs["image"]
@@ -47,21 +74,17 @@ class MiniGridGeometryEncoder:
     def n_states(self) -> int:
         return 4 * (4**5) * 9 * 5 * 4
 
+    def signature(self, obs: dict, carrying: bool, last_action: int) -> StateSignature:
+        return _state_signature(obs, last_action)
+
     def encode(self, obs: dict, carrying: bool, last_action: int) -> int:
-        image = obs["image"]
-        local_shape = (
-            _cell_category(image, 3, 5),  # front
-            _cell_category(image, 2, 5),  # front-left
-            _cell_category(image, 4, 5),  # front-right
-            _cell_category(image, 2, 6),  # left
-            _cell_category(image, 4, 6),  # right
-        )
+        signature = self.signature(obs, carrying, last_action)
         features = (
-            int(obs["direction"]),
-            _mixed_radix(local_shape, (4, 4, 4, 4, 4)),
-            _goal_relative_bin(image),
-            _topology_type(local_shape),
-            min(last_action, 3),
+            signature.direction,
+            _mixed_radix(signature.local_shape, (4, 4, 4, 4, 4)),
+            signature.goal_bin,
+            signature.topology,
+            signature.last_action,
         )
         return _mixed_radix(features, (4, 4**5, 9, 5, 4))
 
@@ -79,6 +102,24 @@ def _mixed_radix(features: tuple[int, ...], bases: tuple[int, ...]) -> int:
     for value, base in zip(features, bases, strict=True):
         index = index * base + int(value)
     return index
+
+
+def _state_signature(obs: dict, last_action: int) -> StateSignature:
+    image = obs["image"]
+    local_shape = (
+        _cell_category(image, 3, 5),  # front
+        _cell_category(image, 2, 5),  # front-left
+        _cell_category(image, 4, 5),  # front-right
+        _cell_category(image, 2, 6),  # left
+        _cell_category(image, 4, 6),  # right
+    )
+    return StateSignature(
+        direction=int(obs["direction"]),
+        local_shape=local_shape,
+        goal_bin=_goal_relative_bin(image),
+        topology=_topology_type(local_shape),
+        last_action=min(last_action, 3),
+    )
 
 
 def _cell_type(image: np.ndarray, x: int, y: int) -> int:

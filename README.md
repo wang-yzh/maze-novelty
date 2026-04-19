@@ -73,6 +73,7 @@ Current experiment report:
 - `docs/experiment_report.md`
 - `docs/version_history.md`
 - `docs/pretraining_transfer_framework.md`
+- `docs/v1.4.7_behavior_prior_transfer.md`
 
 Versioning notes:
 

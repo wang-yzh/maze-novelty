@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
 from agents import QAgent, Rollout
+from core.behavior import BehaviorLibrary, BehaviorPrior
 from minigrid_adapter import MiniGridSpec, MiniGridTabularEnv
 from minigrid_diagnostics import analyze_rollout
+from navigation_motifs import NavigationMotif, extract_navigation_motifs
 from pretraining.artifacts import PretrainArtifact
 from transfer.metrics import (
     AdaptationPoint,
@@ -32,16 +34,31 @@ class TargetReuseConfig:
     probe_epsilon: float = 0.03
     min_subgoal_score: float = 0.018
     min_mobility: float = 0.035
+    min_prior_quality: float = 0.28
+    max_motifs_per_rollout: int = 3
+    max_library_items: int = 24
     reinforce_passes: int = 4
     reward: float = 0.075
     early_fraction: float = 0.40
+    execute_probability: float = 0.30
+    execute_max_actions: int = 6
 
 
 @dataclass(frozen=True)
 class TargetReuseItem:
-    states: tuple[int, ...]
-    actions: tuple[int, ...]
-    score: float
+    prior: BehaviorPrior
+
+    @property
+    def states(self) -> tuple[int, ...]:
+        return self.prior.state_trace
+
+    @property
+    def actions(self) -> tuple[int, ...]:
+        return self.prior.action_trace
+
+    @property
+    def score(self) -> float:
+        return self.prior.score
 
 
 @dataclass(frozen=True)
@@ -49,7 +66,35 @@ class TargetReuseSummary:
     item_count: int
     avg_item_score: float
     best_item_score: float
+    avg_prior_support: float
+    best_prior_support: int
     probe_success_rate: float
+    matched_prior_count: int = 0
+    executed_prior_count: int = 0
+    executed_prior_steps: int = 0
+    executed_episode_count: int = 0
+    idle_episode_count: int = 0
+    executed_episode_avg_subgoal_score: float = 0.0
+    executed_episode_avg_region_transitions: float = 0.0
+    executed_episode_avg_mobility: float = 0.0
+    idle_episode_avg_subgoal_score: float = 0.0
+    idle_episode_avg_region_transitions: float = 0.0
+    idle_episode_avg_mobility: float = 0.0
+
+
+@dataclass
+class PriorExecutionStats:
+    matched_prior_count: int = 0
+    executed_prior_count: int = 0
+    executed_prior_steps: int = 0
+    executed_episode_count: int = 0
+    idle_episode_count: int = 0
+    executed_episode_subgoal_total: float = 0.0
+    executed_episode_region_transition_total: float = 0.0
+    executed_episode_mobility_total: float = 0.0
+    idle_episode_subgoal_total: float = 0.0
+    idle_episode_region_transition_total: float = 0.0
+    idle_episode_mobility_total: float = 0.0
 
 
 def pretrain_q_agent(
@@ -89,7 +134,7 @@ def evaluate_transfer(
     scratch_final_score: float = 0.0,
 ) -> tuple[TransferReport, list[AdaptationPoint]]:
     agent = artifact.best_agent()
-    points = adapt_agent(target_spec, agent, seed, config)
+    points, _execution_stats = adapt_agent(target_spec, agent, seed, config)
     zero_shot = points[0].score if points else 0.0
     final_score = points[-1].score if points else 0.0
     lift = final_score - scratch_final_score
@@ -121,10 +166,49 @@ def evaluate_transfer_with_target_reuse(
 ) -> tuple[TransferReport, list[AdaptationPoint], TargetReuseSummary]:
     agent = artifact.best_agent()
     reuse_items, reuse_summary = build_target_reuse_items(target_spec, agent, seed + 7000, reuse_config)
-    points = adapt_agent(target_spec, agent, seed, config, reuse_items=reuse_items, reuse_config=reuse_config)
+    points, execution_stats = adapt_agent(
+        target_spec,
+        agent,
+        seed,
+        config,
+        reuse_items=reuse_items,
+        reuse_config=reuse_config,
+    )
     zero_shot = points[0].score if points else 0.0
     final_score = points[-1].score if points else 0.0
     lift = final_score - scratch_final_score
+    reuse_summary = replace(
+        reuse_summary,
+        matched_prior_count=execution_stats.matched_prior_count,
+        executed_prior_count=execution_stats.executed_prior_count,
+        executed_prior_steps=execution_stats.executed_prior_steps,
+        executed_episode_count=execution_stats.executed_episode_count,
+        idle_episode_count=execution_stats.idle_episode_count,
+        executed_episode_avg_subgoal_score=_average(
+            execution_stats.executed_episode_subgoal_total,
+            execution_stats.executed_episode_count,
+        ),
+        executed_episode_avg_region_transitions=_average(
+            execution_stats.executed_episode_region_transition_total,
+            execution_stats.executed_episode_count,
+        ),
+        executed_episode_avg_mobility=_average(
+            execution_stats.executed_episode_mobility_total,
+            execution_stats.executed_episode_count,
+        ),
+        idle_episode_avg_subgoal_score=_average(
+            execution_stats.idle_episode_subgoal_total,
+            execution_stats.idle_episode_count,
+        ),
+        idle_episode_avg_region_transitions=_average(
+            execution_stats.idle_episode_region_transition_total,
+            execution_stats.idle_episode_count,
+        ),
+        idle_episode_avg_mobility=_average(
+            execution_stats.idle_episode_mobility_total,
+            execution_stats.idle_episode_count,
+        ),
+    )
     return (
         TransferReport(
             method=f"{artifact.method}+target_reuse",
@@ -153,7 +237,7 @@ def evaluate_scratch(
     env = MiniGridTabularEnv(target_spec, episode_seed=seed)
     agent = QAgent(env.n_states, env.n_actions, rng)
     env.close()
-    points = adapt_agent(target_spec, agent, seed, config)
+    points, _execution_stats = adapt_agent(target_spec, agent, seed, config)
     final_score = points[-1].score if points else 0.0
     return (
         TransferReport(
@@ -178,20 +262,41 @@ def adapt_agent(
     config: AdaptationConfig,
     reuse_items: list[TargetReuseItem] | None = None,
     reuse_config: TargetReuseConfig | None = None,
-) -> list[AdaptationPoint]:
+) -> tuple[list[AdaptationPoint], PriorExecutionStats]:
     rng = np.random.default_rng(seed)
     env = MiniGridTabularEnv(spec, episode_seed=seed)
     points = [_adaptation_point(spec, agent, seed + 10000, 0, config.eval_episodes)]
+    execution_stats = PriorExecutionStats()
     reuse_horizon = int(config.episodes * (reuse_config.early_fraction if reuse_config is not None else 0.0))
+    prior_library = _build_prior_library(reuse_items, reuse_config.max_library_items if reuse_config is not None else 0)
     for episode in range(1, config.episodes + 1):
-        if reuse_items and reuse_config is not None and episode <= reuse_horizon:
-            _reinforce_target_reuse(agent, reuse_items, rng, reuse_config)
+        use_priors = bool(reuse_items and reuse_config is not None and episode <= reuse_horizon)
+        active_reuse_items = reuse_items if use_priors else None
+        active_reuse_config = reuse_config if use_priors else None
+        episode_execution_stats = PriorExecutionStats()
+        if use_priors:
+            assert active_reuse_items is not None
+            assert active_reuse_config is not None
+            _reinforce_target_reuse(agent, active_reuse_items, rng, active_reuse_config)
         env.episode_seed = seed + episode
-        _run_episode(env, agent, rng, epsilon=config.epsilon, train=True)
+        rollout = _run_episode(
+            env,
+            agent,
+            rng,
+            epsilon=config.epsilon,
+            train=True,
+            prior_library=prior_library if use_priors else None,
+            prior_execute_prob=active_reuse_config.execute_probability if active_reuse_config is not None else 0.0,
+            execute_max_actions=active_reuse_config.execute_max_actions if active_reuse_config is not None else 0,
+            execution_stats=episode_execution_stats if use_priors else None,
+        )
+        if use_priors:
+            _accumulate_execution_stats(execution_stats, episode_execution_stats)
+            _accumulate_episode_diagnostics(execution_stats, rollout, spec.max_steps, episode_execution_stats)
         if episode % config.eval_every == 0 or episode == config.episodes:
             points.append(_adaptation_point(spec, agent, seed + 10000 + episode, episode, config.eval_episodes))
     env.close()
-    return points
+    return points, execution_stats
 
 
 def evaluate_agent(spec: MiniGridSpec, agent: QAgent, seed: int, eval_episodes: int) -> AdaptationPoint:
@@ -206,23 +311,26 @@ def build_target_reuse_items(
 ) -> tuple[list[TargetReuseItem], TargetReuseSummary]:
     rng = np.random.default_rng(seed)
     env = MiniGridTabularEnv(spec)
-    items = []
+    library = BehaviorLibrary(max_items=config.max_library_items)
     successes = 0
     for idx in range(config.probe_episodes):
         env.episode_seed = seed + idx
         rollout = _run_episode(env, agent, rng, epsilon=config.probe_epsilon, train=False)
         successes += int(rollout.success)
-        item = _target_reuse_item(rollout, spec.max_steps, config)
-        if item is not None:
-            items.append(item)
+        for prior in _target_reuse_priors(rollout, spec.max_steps, config):
+            library.add(prior)
     env.close()
+    items = [TargetReuseItem(prior) for prior in library.priors]
     scores = [item.score for item in items]
+    supports = [item.prior.support for item in items]
     return (
         items,
         TargetReuseSummary(
             item_count=len(items),
             avg_item_score=float(np.mean(scores)) if scores else 0.0,
             best_item_score=float(max(scores)) if scores else 0.0,
+            avg_prior_support=float(np.mean(supports)) if supports else 0.0,
+            best_prior_support=int(max(supports)) if supports else 0,
             probe_success_rate=successes / max(1, config.probe_episodes),
         ),
     )
@@ -249,13 +357,13 @@ def _adaptation_point(
     return AdaptationPoint(step=step, success_rate=success_rate, avg_steps=avg_steps, score=score)
 
 
-def _target_reuse_item(
+def _target_reuse_priors(
     rollout: Rollout,
     max_steps: int,
     config: TargetReuseConfig,
-) -> TargetReuseItem | None:
+) -> list[BehaviorPrior]:
     if len(rollout.actions) < 2:
-        return None
+        return []
     diagnostics = analyze_rollout(rollout, max_steps)
     if (
         not rollout.success
@@ -263,16 +371,130 @@ def _target_reuse_item(
         and diagnostics.mobility < config.min_mobility
         and diagnostics.region_transition_count < 1
     ):
+        return []
+    motifs = extract_navigation_motifs(rollout)
+    priors = []
+    for motif in motifs[: config.max_motifs_per_rollout]:
+        prior = _behavior_prior_from_motif(rollout, motif, diagnostics.subgoal_score)
+        if prior is not None and prior.score >= config.min_prior_quality:
+            priors.append(prior)
+    if priors:
+        return priors
+    fallback = _fallback_trace_prior(rollout, diagnostics.subgoal_score, config)
+    return [fallback] if fallback is not None else []
+
+
+def _behavior_prior_from_motif(
+    rollout: Rollout,
+    motif: NavigationMotif,
+    subgoal_score: float,
+) -> BehaviorPrior | None:
+    if not rollout.state_signatures:
         return None
-    success_bonus = 0.30 if rollout.success else 0.0
+    start = motif.start
+    end = motif.end
+    if start < 0 or end <= start or end >= len(rollout.state_signatures):
+        return None
+    action_trace = tuple(int(action) for action in motif.actions)
+    if len(action_trace) < 2:
+        return None
+    state_trace = tuple(int(state) for state in rollout.states[start : end + 1])
+    if len(state_trace) != len(action_trace) + 1:
+        return None
+    kind_bonus = {
+        "region_transition": 0.14,
+        "forward_run": 0.08,
+        "wall_follow_left": 0.06,
+        "wall_follow_right": 0.06,
+        "unstuck": 0.05,
+    }.get(motif.kind, 0.0)
     score = (
-        success_bonus
-        + 0.36 * diagnostics.subgoal_score
-        + 0.24 * min(1.0, diagnostics.region_transition_count / 6.0)
-        + 0.20 * min(1.0, diagnostics.new_region_count / 4.0)
-        + 0.20 * diagnostics.mobility
+        kind_bonus
+        + 0.62 * motif.quality
+        + 0.18 * subgoal_score
+        + 0.10 * min(1.0, motif.region_transitions)
+        + 0.10 * (1.0 - motif.collision_proxy_rate)
     )
-    return TargetReuseItem(tuple(rollout.states), tuple(rollout.actions), score)
+    return BehaviorPrior(
+        kind=motif.kind,
+        initiation=rollout.state_signatures[start],
+        action_trace=action_trace,
+        termination=rollout.state_signatures[end],
+        score=max(0.0, min(1.0, score)),
+        source="target_probe_navigation",
+        state_trace=state_trace,
+    )
+
+
+def _fallback_trace_prior(
+    rollout: Rollout,
+    subgoal_score: float,
+    config: TargetReuseConfig,
+) -> BehaviorPrior | None:
+    if not rollout.state_signatures:
+        return None
+    action_count = min(len(rollout.actions), max(2, config.execute_max_actions))
+    if action_count < 2 or action_count >= len(rollout.state_signatures):
+        return None
+    score = 0.22 * float(rollout.success) + 0.46 * subgoal_score + 0.16 * min(1.0, action_count / 6.0)
+    if score < config.min_prior_quality:
+        return None
+    return BehaviorPrior(
+        kind="target_trace",
+        initiation=rollout.state_signatures[0],
+        action_trace=tuple(int(action) for action in rollout.actions[:action_count]),
+        termination=rollout.state_signatures[action_count],
+        score=max(0.0, min(1.0, score)),
+        source="target_probe_trace",
+        state_trace=tuple(int(state) for state in rollout.states[: action_count + 1]),
+    )
+
+
+def _build_prior_library(
+    reuse_items: list[TargetReuseItem] | None,
+    max_items: int,
+) -> BehaviorLibrary | None:
+    if not reuse_items or max_items <= 0:
+        return None
+    library = BehaviorLibrary(max_items=max_items)
+    for item in reuse_items:
+        library.add(item.prior)
+    return library
+
+
+def _accumulate_execution_stats(
+    aggregate: PriorExecutionStats,
+    episode: PriorExecutionStats,
+) -> None:
+    aggregate.matched_prior_count += episode.matched_prior_count
+    aggregate.executed_prior_count += episode.executed_prior_count
+    aggregate.executed_prior_steps += episode.executed_prior_steps
+
+
+def _accumulate_episode_diagnostics(
+    aggregate: PriorExecutionStats,
+    rollout: Rollout,
+    max_steps: int,
+    episode: PriorExecutionStats,
+) -> None:
+    diagnostics = analyze_rollout(rollout, max_steps)
+    if episode.executed_prior_count > 0:
+        aggregate.executed_episode_count += 1
+        aggregate.executed_episode_subgoal_total += diagnostics.subgoal_score
+        aggregate.executed_episode_region_transition_total += diagnostics.region_transition_count
+        aggregate.executed_episode_mobility_total += diagnostics.mobility
+        return
+
+    aggregate.idle_episode_count += 1
+    aggregate.idle_episode_subgoal_total += diagnostics.subgoal_score
+    aggregate.idle_episode_region_transition_total += diagnostics.region_transition_count
+    aggregate.idle_episode_mobility_total += diagnostics.mobility
+
+
+def _average(total: float, count: int) -> float:
+    if count <= 0:
+        return 0.0
+    return total / count
 
 
 def _reinforce_target_reuse(
@@ -288,6 +510,8 @@ def _reinforce_target_reuse(
     for _ in range(config.reinforce_passes):
         item = items[int(rng.choice(len(items), p=weights))]
         reward = config.reward * (0.50 + item.score)
+        if len(item.states) != len(item.actions) + 1:
+            continue
         for idx, action in enumerate(item.actions):
             state = item.states[idx]
             next_state = item.states[idx + 1]
@@ -301,18 +525,39 @@ def _run_episode(
     rng: np.random.Generator,
     epsilon: float,
     train: bool,
+    prior_library: BehaviorLibrary | None = None,
+    prior_execute_prob: float = 0.0,
+    execute_max_actions: int = 0,
+    execution_stats: PriorExecutionStats | None = None,
 ) -> Rollout:
     state = env.reset()
     states = [state]
     positions = [env.position]
+    state_signatures = [env.state_signature]
     actions = []
     rewards = []
     success = False
+    queued_actions: list[int] = []
     while True:
-        if rng.random() < epsilon:
-            action = int(rng.integers(env.n_actions))
+        if queued_actions:
+            action = queued_actions.pop(0)
         else:
-            action = agent.act(state, 0.0)
+            matched_prior = None
+            if prior_library is not None and prior_execute_prob > 0.0:
+                matched_prior = prior_library.best_match(env.state_signature)
+                if matched_prior is not None and execution_stats is not None:
+                    execution_stats.matched_prior_count += 1
+            if matched_prior is not None and rng.random() < prior_execute_prob and matched_prior.action_trace:
+                limited_trace = matched_prior.action_trace[: max(1, execute_max_actions)]
+                action = int(limited_trace[0])
+                queued_actions.extend(int(candidate) for candidate in limited_trace[1:])
+                if execution_stats is not None:
+                    execution_stats.executed_prior_count += 1
+                    execution_stats.executed_prior_steps += len(limited_trace)
+            elif rng.random() < epsilon:
+                action = int(rng.integers(env.n_actions))
+            else:
+                action = agent.act(state, 0.0)
         next_state, reward, done, info = env.step(action)
         if train:
             agent.update(state, action, reward, next_state, done)
@@ -320,8 +565,18 @@ def _run_episode(
         rewards.append(reward)
         states.append(next_state)
         positions.append(info["position"])
+        state_signatures.append(info["state_signature"])
         state = next_state
         success = bool(info["success"])
         if done:
             break
-    return Rollout(states, positions, actions, rewards, success, len(actions), float(np.sum(rewards)))
+    return Rollout(
+        states,
+        positions,
+        actions,
+        rewards,
+        success,
+        len(actions),
+        float(np.sum(rewards)),
+        state_signatures=state_signatures,
+    )

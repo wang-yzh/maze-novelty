@@ -93,6 +93,7 @@ def _run_policy_episode(args, env: MiniGridTabularEnv, policy, rng: np.random.Ge
     state = env.reset()
     states = [state]
     positions = [env.position]
+    state_signatures = [env.state_signature]
     actions = []
     rewards = []
     success = False
@@ -105,13 +106,23 @@ def _run_policy_episode(args, env: MiniGridTabularEnv, policy, rng: np.random.Ge
         rewards.append(reward)
         states.append(next_state)
         positions.append(info["position"])
+        state_signatures.append(info["state_signature"])
         previous_action = action
         previous_position = positions[-2]
         state = next_state
         success = bool(info["success"])
         if done:
             break
-    return Rollout(states, positions, actions, rewards, success, len(actions), float(np.sum(rewards)))
+    return Rollout(
+        states,
+        positions,
+        actions,
+        rewards,
+        success,
+        len(actions),
+        float(np.sum(rewards)),
+        state_signatures=state_signatures,
+    )
 
 
 def _random_policy(rng: np.random.Generator, _previous_action: int, _previous_position, _position) -> int:

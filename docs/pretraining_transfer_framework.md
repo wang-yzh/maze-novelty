@@ -664,6 +664,47 @@ subgoal-conditioned exploration,
 or a temporary behavior prior during early adaptation.
 ```
 
+## Behavior Prior Transfer Probe
+
+The next minimal probe has now been implemented on the current branch:
+
+```text
+state signature
+-> navigation-motif prior extraction
+-> repeated-prior merging
+-> early adaptation prior execution
+```
+
+This is intentionally still smaller than a full options system. The important
+question is not "did transfer succeed already?" but:
+
+```text
+did the reusable-structure executor actually fire?
+```
+
+The first quick probe remained all-zero on final transfer score. That negative
+result should be preserved.
+
+The useful positive signal is different:
+
+- repeated structural priors were extracted;
+- prior support could exceed `1`, so duplicated fragments no longer remained
+  isolated raw traces;
+- matched-prior counts and executed-prior counts were both substantial during
+  early adaptation;
+- executed-prior episodes already showed different structural profiles across
+  artifact families, even though final score remained zero;
+- therefore the bottleneck moved again:
+
+```text
+not "can we execute target-side priors?"
+but "how should executed priors change adaptation dynamics enough to create success?"
+```
+
+The dedicated writeup for this step is:
+
+- `docs/v1.4.7_behavior_prior_transfer.md`
+
 ## Decision Rule
 
 After the framework exists, new cycle variants should only be promoted when they improve at least one of:

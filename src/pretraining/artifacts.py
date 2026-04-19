@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agents import QAgent
+from core.behavior import BehaviorLibrary
 
 
 @dataclass
@@ -13,6 +14,7 @@ class ArtifactSummary:
     seed: int
     population_size: int
     hall_of_fame_size: int
+    behavior_prior_count: int
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -23,6 +25,7 @@ class PretrainArtifact:
     seed: int
     population: list[QAgent]
     hall_of_fame: list[QAgent]
+    behavior_library: BehaviorLibrary = field(default_factory=BehaviorLibrary)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def best_agent(self) -> QAgent:
@@ -39,5 +42,6 @@ class PretrainArtifact:
             seed=self.seed,
             population_size=len(self.population),
             hall_of_fame_size=len(self.hall_of_fame),
+            behavior_prior_count=len(self.behavior_library),
             metadata=dict(self.metadata),
         )

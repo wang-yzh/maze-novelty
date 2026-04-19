@@ -57,6 +57,19 @@ SUMMARY_METRICS = [
     "target_reuse_item_count",
     "target_reuse_avg_item_score",
     "target_reuse_best_item_score",
+    "target_reuse_avg_prior_support",
+    "target_reuse_best_prior_support",
+    "target_reuse_matched_prior_count",
+    "target_reuse_executed_prior_count",
+    "target_reuse_executed_prior_steps",
+    "target_reuse_executed_episode_count",
+    "target_reuse_idle_episode_count",
+    "target_reuse_executed_episode_avg_subgoal_score",
+    "target_reuse_executed_episode_avg_region_transitions",
+    "target_reuse_executed_episode_avg_mobility",
+    "target_reuse_idle_episode_avg_subgoal_score",
+    "target_reuse_idle_episode_avg_region_transitions",
+    "target_reuse_idle_episode_avg_mobility",
     "target_reuse_probe_success",
 ]
 
@@ -166,6 +179,19 @@ def main() -> None:
                             "target_reuse_item_count": reuse_summary.item_count,
                             "target_reuse_avg_item_score": reuse_summary.avg_item_score,
                             "target_reuse_best_item_score": reuse_summary.best_item_score,
+                            "target_reuse_avg_prior_support": reuse_summary.avg_prior_support,
+                            "target_reuse_best_prior_support": reuse_summary.best_prior_support,
+                            "target_reuse_matched_prior_count": reuse_summary.matched_prior_count,
+                            "target_reuse_executed_prior_count": reuse_summary.executed_prior_count,
+                            "target_reuse_executed_prior_steps": reuse_summary.executed_prior_steps,
+                            "target_reuse_executed_episode_count": reuse_summary.executed_episode_count,
+                            "target_reuse_idle_episode_count": reuse_summary.idle_episode_count,
+                            "target_reuse_executed_episode_avg_subgoal_score": reuse_summary.executed_episode_avg_subgoal_score,
+                            "target_reuse_executed_episode_avg_region_transitions": reuse_summary.executed_episode_avg_region_transitions,
+                            "target_reuse_executed_episode_avg_mobility": reuse_summary.executed_episode_avg_mobility,
+                            "target_reuse_idle_episode_avg_subgoal_score": reuse_summary.idle_episode_avg_subgoal_score,
+                            "target_reuse_idle_episode_avg_region_transitions": reuse_summary.idle_episode_avg_region_transitions,
+                            "target_reuse_idle_episode_avg_mobility": reuse_summary.idle_episode_avg_mobility,
                             "target_reuse_probe_success": reuse_summary.probe_success_rate,
                         },
                     )
@@ -204,6 +230,19 @@ def _report_row(
     row["target_reuse_item_count"] = ""
     row["target_reuse_avg_item_score"] = ""
     row["target_reuse_best_item_score"] = ""
+    row["target_reuse_avg_prior_support"] = ""
+    row["target_reuse_best_prior_support"] = ""
+    row["target_reuse_matched_prior_count"] = ""
+    row["target_reuse_executed_prior_count"] = ""
+    row["target_reuse_executed_prior_steps"] = ""
+    row["target_reuse_executed_episode_count"] = ""
+    row["target_reuse_idle_episode_count"] = ""
+    row["target_reuse_executed_episode_avg_subgoal_score"] = ""
+    row["target_reuse_executed_episode_avg_region_transitions"] = ""
+    row["target_reuse_executed_episode_avg_mobility"] = ""
+    row["target_reuse_idle_episode_avg_subgoal_score"] = ""
+    row["target_reuse_idle_episode_avg_region_transitions"] = ""
+    row["target_reuse_idle_episode_avg_mobility"] = ""
     row["target_reuse_probe_success"] = ""
     if target_probe is not None:
         row.update(target_probe)
