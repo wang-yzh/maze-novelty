@@ -232,6 +232,109 @@ def test_run_episode_aborts_prior_when_signature_mismatches() -> None:
     assert execution_stats.aborted_prior_steps == 1
 
 
+def test_run_episode_tolerates_single_mismatch_when_tolerance_is_one() -> None:
+    env_signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1, topology=3),
+        _signature(direction=0, last_action=2),
+        _signature(direction=0, last_action=0),
+    ]
+    prior_signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1),
+        _signature(direction=0, last_action=2),
+        _signature(direction=0, last_action=0),
+    ]
+    env = _DummyEnv(env_signatures)
+    agent = QAgent(5, 3, np.random.default_rng(21))
+    agent.q[:, 0] = 4.0
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=prior_signatures[0],
+            action_trace=(1, 2, 2),
+            termination=prior_signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2, 3),
+            signature_trace=tuple(prior_signatures),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=3,
+        abort_on_mismatch=True,
+        mismatch_tolerance=1,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:3] == [1, 2, 2]
+    assert execution_stats.executed_prior_count == 1
+    assert execution_stats.executed_prior_steps == 3
+    assert execution_stats.aborted_prior_count == 0
+    assert execution_stats.aborted_prior_steps == 0
+
+
+def test_run_episode_aborts_after_consecutive_mismatches_exceed_tolerance() -> None:
+    env_signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1, topology=3),
+        _signature(direction=0, last_action=2, topology=3),
+        _signature(direction=0, last_action=0),
+    ]
+    prior_signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1),
+        _signature(direction=0, last_action=2),
+        _signature(direction=0, last_action=0),
+    ]
+    env = _DummyEnv(env_signatures)
+    agent = QAgent(5, 3, np.random.default_rng(21))
+    agent.q[:, 0] = 4.0
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=prior_signatures[0],
+            action_trace=(1, 2, 2),
+            termination=prior_signatures[-1],
+            score=0.9,
+            state_trace=(0, 1, 2, 3),
+            signature_trace=tuple(prior_signatures),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    rollout = _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=3,
+        abort_on_mismatch=True,
+        mismatch_tolerance=1,
+        execution_stats=execution_stats,
+    )
+
+    assert rollout.actions[:2] == [1, 2]
+    assert rollout.actions[2] == 0
+    assert execution_stats.executed_prior_count == 1
+    assert execution_stats.executed_prior_steps == 2
+    assert execution_stats.aborted_prior_count == 1
+    assert execution_stats.aborted_prior_steps == 1
+
+
 def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> None:
     aggregate = PriorExecutionStats()
     executed_episode = PriorExecutionStats(matched_prior_count=3, executed_prior_count=1, executed_prior_steps=2)
@@ -271,12 +374,18 @@ def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> Non
     assert aggregate.executed_episode_region_transition_total >= aggregate.idle_episode_region_transition_total
 
 
-def _signature(direction: int = 0, last_action: int = 3, goal_bin: int = 4) -> StateSignature:
+def _signature(
+    direction: int = 0,
+    last_action: int = 3,
+    goal_bin: int = 4,
+    topology: int = 2,
+    local_shape: tuple[int, int, int, int, int] = (0, 0, 0, 1, 1),
+) -> StateSignature:
     return StateSignature(
         direction=direction,
-        local_shape=(0, 0, 0, 1, 1),
+        local_shape=local_shape,
         goal_bin=goal_bin,
-        topology=2,
+        topology=topology,
         last_action=last_action,
     )
 

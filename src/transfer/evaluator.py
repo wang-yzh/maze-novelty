@@ -45,6 +45,7 @@ class TargetReuseConfig:
     execute_probability: float = 0.30
     execute_max_actions: int = 6
     abort_on_mismatch: bool = True
+    mismatch_tolerance: int = 0
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,7 @@ class ActivePriorExecution:
     remaining_actions: list[int]
     remaining_signatures: list[StateSignature]
     match_mode: str
+    consecutive_mismatches: int = 0
 
 
 def pretrain_q_agent(
@@ -226,7 +228,11 @@ def evaluate_transfer_with_target_reuse(
             execution_stats.idle_episode_count,
         ),
     )
-    execution_mode = "abort" if reuse_config.abort_on_mismatch else "open_loop"
+    execution_mode = (
+        f"abort_t{reuse_config.mismatch_tolerance}"
+        if reuse_config.abort_on_mismatch
+        else "open_loop"
+    )
     return (
         TransferReport(
             method=f"{artifact.method}+target_reuse[{reuse_config.match_mode}|{execution_mode}]",
@@ -311,6 +317,7 @@ def adapt_agent(
             prior_execute_prob=active_reuse_config.execute_probability if active_reuse_config is not None else 0.0,
             execute_max_actions=active_reuse_config.execute_max_actions if active_reuse_config is not None else 0,
             abort_on_mismatch=active_reuse_config.abort_on_mismatch if active_reuse_config is not None else False,
+            mismatch_tolerance=active_reuse_config.mismatch_tolerance if active_reuse_config is not None else 0,
             execution_stats=episode_execution_stats if use_priors else None,
         )
         if use_priors:
@@ -576,6 +583,7 @@ def _run_episode(
     prior_execute_prob: float = 0.0,
     execute_max_actions: int = 0,
     abort_on_mismatch: bool = False,
+    mismatch_tolerance: int = 0,
     execution_stats: PriorExecutionStats | None = None,
 ) -> Rollout:
     state = env.reset()
@@ -626,7 +634,11 @@ def _run_episode(
             execution_stats.executed_prior_steps += 1
         if step_prior is not None and expected_signature is not None:
             mismatch = not expected_signature.matches(info["state_signature"], mode=step_prior.match_mode)
-            if mismatch and abort_on_mismatch:
+            if mismatch:
+                step_prior.consecutive_mismatches += 1
+            else:
+                step_prior.consecutive_mismatches = 0
+            if mismatch and abort_on_mismatch and step_prior.consecutive_mismatches > mismatch_tolerance:
                 if execution_stats is not None and step_prior.remaining_actions:
                     execution_stats.aborted_prior_count += 1
                     execution_stats.aborted_prior_steps += len(step_prior.remaining_actions)
