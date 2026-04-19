@@ -304,6 +304,8 @@ def test_run_episode_executes_matching_behavior_prior_before_agent_policy() -> N
     assert execution_stats.matched_prior_count >= 1
     assert execution_stats.executed_prior_count == 1
     assert execution_stats.executed_prior_steps == 2
+    assert execution_stats.completed_prior_count == 1
+    assert execution_stats.aborted_prior_count == 0
 
 
 def test_run_episode_aborts_prior_when_signature_mismatches() -> None:
@@ -355,6 +357,9 @@ def test_run_episode_aborts_prior_when_signature_mismatches() -> None:
     assert execution_stats.executed_prior_steps == 2
     assert execution_stats.aborted_prior_count == 1
     assert execution_stats.aborted_prior_steps == 1
+    assert execution_stats.mismatch_abort_count == 1
+    assert execution_stats.first_step_mismatch_count == 0
+    assert execution_stats.completed_prior_count == 0
 
 
 def test_run_episode_tolerates_single_mismatch_when_tolerance_is_one() -> None:
@@ -404,6 +409,8 @@ def test_run_episode_tolerates_single_mismatch_when_tolerance_is_one() -> None:
     assert rollout.actions[:3] == [1, 2, 2]
     assert execution_stats.executed_prior_count == 1
     assert execution_stats.executed_prior_steps == 3
+    assert execution_stats.completed_prior_count == 1
+    assert execution_stats.first_step_mismatch_count == 1
     assert execution_stats.aborted_prior_count == 0
     assert execution_stats.aborted_prior_steps == 0
 
@@ -458,6 +465,8 @@ def test_run_episode_aborts_after_consecutive_mismatches_exceed_tolerance() -> N
     assert execution_stats.executed_prior_steps == 2
     assert execution_stats.aborted_prior_count == 1
     assert execution_stats.aborted_prior_steps == 1
+    assert execution_stats.mismatch_abort_count == 1
+    assert execution_stats.first_step_mismatch_count == 1
 
 
 def test_motif_consistency_continuation_aborts_when_prior_stalls() -> None:
@@ -502,7 +511,9 @@ def test_motif_consistency_continuation_aborts_when_prior_stalls() -> None:
     assert execution_stats.executed_prior_count == 1
     assert execution_stats.executed_prior_steps == 1
     assert execution_stats.stalled_prior_steps == 1
+    assert execution_stats.first_step_stall_count == 1
     assert execution_stats.aborted_prior_count == 1
+    assert execution_stats.stall_abort_count == 1
     assert execution_stats.aborted_prior_steps == 1
 
 
@@ -546,6 +557,7 @@ def test_motif_consistency_does_not_treat_turning_in_place_as_stall() -> None:
 
     assert rollout.actions[:2] == [1, 2]
     assert execution_stats.executed_prior_steps == 2
+    assert execution_stats.completed_prior_count == 1
     assert execution_stats.stalled_prior_steps == 0
     assert execution_stats.aborted_prior_count == 0
 
@@ -600,7 +612,55 @@ def test_progress_guard_continuation_tolerates_mismatch_while_progress_evidence_
     assert execution_stats.executed_prior_count == 1
     assert execution_stats.executed_prior_steps == 3
     assert execution_stats.mismatched_prior_steps == 3
+    assert execution_stats.first_step_mismatch_count == 1
+    assert execution_stats.completed_prior_count == 1
     assert execution_stats.aborted_prior_count == 0
+
+
+def test_run_episode_records_prior_truncation_when_episode_ends_mid_option() -> None:
+    signatures = [
+        _signature(direction=0, last_action=3),
+        _signature(direction=0, last_action=1),
+    ]
+    env = _DummyEnv(signatures)
+    agent = QAgent(4, 3, np.random.default_rng(23))
+    agent.q[:, 0] = 6.0
+    library = BehaviorLibrary(max_items=4)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=signatures[0],
+            action_trace=(1, 2, 2),
+            termination=_signature(direction=0, last_action=2),
+            score=0.9,
+            state_trace=(0, 1, 2, 3),
+            signature_trace=(
+                signatures[0],
+                signatures[1],
+                _signature(direction=0, last_action=2),
+                _signature(direction=0, last_action=2),
+            ),
+        )
+    )
+    execution_stats = PriorExecutionStats()
+
+    _run_episode(
+        env,
+        agent,
+        np.random.default_rng(3),
+        epsilon=0.0,
+        train=False,
+        prior_library=library,
+        prior_execute_prob=1.0,
+        execute_max_actions=3,
+        abort_on_mismatch=True,
+        execution_stats=execution_stats,
+    )
+
+    assert execution_stats.executed_prior_count == 1
+    assert execution_stats.executed_prior_steps == 1
+    assert execution_stats.completed_prior_count == 0
+    assert execution_stats.truncated_prior_count == 1
 
 
 def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> None:

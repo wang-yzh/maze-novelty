@@ -80,9 +80,16 @@ class TargetReuseSummary:
     probe_success_rate: float
     matched_prior_count: int = 0
     executed_prior_count: int = 0
+    completed_prior_count: int = 0
+    truncated_prior_count: int = 0
     executed_prior_steps: int = 0
+    first_step_mismatch_count: int = 0
+    first_step_stall_count: int = 0
     mismatched_prior_steps: int = 0
     stalled_prior_steps: int = 0
+    mismatch_abort_count: int = 0
+    stall_abort_count: int = 0
+    progress_lost_abort_count: int = 0
     aborted_prior_count: int = 0
     aborted_prior_steps: int = 0
     executed_episode_count: int = 0
@@ -99,9 +106,16 @@ class TargetReuseSummary:
 class PriorExecutionStats:
     matched_prior_count: int = 0
     executed_prior_count: int = 0
+    completed_prior_count: int = 0
+    truncated_prior_count: int = 0
     executed_prior_steps: int = 0
+    first_step_mismatch_count: int = 0
+    first_step_stall_count: int = 0
     mismatched_prior_steps: int = 0
     stalled_prior_steps: int = 0
+    mismatch_abort_count: int = 0
+    stall_abort_count: int = 0
+    progress_lost_abort_count: int = 0
     aborted_prior_count: int = 0
     aborted_prior_steps: int = 0
     executed_episode_count: int = 0
@@ -122,6 +136,14 @@ class ActivePriorExecution:
     match_mode: str
     consecutive_mismatches: int = 0
     consecutive_stalls: int = 0
+    executed_steps: int = 0
+
+
+@dataclass(frozen=True)
+class PriorStepAssessment:
+    mismatch: bool = False
+    stalled: bool = False
+    abort_reason: str = ""
 
 
 def pretrain_q_agent(
@@ -208,9 +230,16 @@ def evaluate_transfer_with_target_reuse(
         reuse_summary,
         matched_prior_count=execution_stats.matched_prior_count,
         executed_prior_count=execution_stats.executed_prior_count,
+        completed_prior_count=execution_stats.completed_prior_count,
+        truncated_prior_count=execution_stats.truncated_prior_count,
         executed_prior_steps=execution_stats.executed_prior_steps,
+        first_step_mismatch_count=execution_stats.first_step_mismatch_count,
+        first_step_stall_count=execution_stats.first_step_stall_count,
         mismatched_prior_steps=execution_stats.mismatched_prior_steps,
         stalled_prior_steps=execution_stats.stalled_prior_steps,
+        mismatch_abort_count=execution_stats.mismatch_abort_count,
+        stall_abort_count=execution_stats.stall_abort_count,
+        progress_lost_abort_count=execution_stats.progress_lost_abort_count,
         aborted_prior_count=execution_stats.aborted_prior_count,
         aborted_prior_steps=execution_stats.aborted_prior_steps,
         executed_episode_count=execution_stats.executed_episode_count,
@@ -546,9 +575,16 @@ def _accumulate_execution_stats(
 ) -> None:
     aggregate.matched_prior_count += episode.matched_prior_count
     aggregate.executed_prior_count += episode.executed_prior_count
+    aggregate.completed_prior_count += episode.completed_prior_count
+    aggregate.truncated_prior_count += episode.truncated_prior_count
     aggregate.executed_prior_steps += episode.executed_prior_steps
+    aggregate.first_step_mismatch_count += episode.first_step_mismatch_count
+    aggregate.first_step_stall_count += episode.first_step_stall_count
     aggregate.mismatched_prior_steps += episode.mismatched_prior_steps
     aggregate.stalled_prior_steps += episode.stalled_prior_steps
+    aggregate.mismatch_abort_count += episode.mismatch_abort_count
+    aggregate.stall_abort_count += episode.stall_abort_count
+    aggregate.progress_lost_abort_count += episode.progress_lost_abort_count
     aggregate.aborted_prior_count += episode.aborted_prior_count
     aggregate.aborted_prior_steps += episode.aborted_prior_steps
 
@@ -624,7 +660,7 @@ def _has_progress_evidence(signature: StateSignature) -> bool:
     return signature.goal_bin != 4 or signature.topology in (1, 2, 3)
 
 
-def _should_abort_prior_execution(
+def _assess_prior_execution_step(
     step_prior: ActivePriorExecution,
     action: int,
     expected_signature: StateSignature | None,
@@ -635,13 +671,10 @@ def _should_abort_prior_execution(
     mismatch_tolerance: int,
     continuation_rule: str,
     stall_tolerance: int,
-    execution_stats: PriorExecutionStats | None,
-) -> bool:
+) -> PriorStepAssessment:
     stalled = action == 2 and observed_position == previous_position
     if stalled:
         step_prior.consecutive_stalls += 1
-        if execution_stats is not None:
-            execution_stats.stalled_prior_steps += 1
     else:
         step_prior.consecutive_stalls = 0
 
@@ -650,32 +683,62 @@ def _should_abort_prior_execution(
         mismatch = not expected_signature.matches(observed_signature, mode=step_prior.match_mode)
         if mismatch:
             step_prior.consecutive_mismatches += 1
-            if execution_stats is not None:
-                execution_stats.mismatched_prior_steps += 1
         else:
             step_prior.consecutive_mismatches = 0
 
     if not abort_on_mismatch:
-        return False
+        return PriorStepAssessment(mismatch=mismatch, stalled=stalled)
 
     if continuation_rule == "signature":
-        return mismatch and step_prior.consecutive_mismatches > mismatch_tolerance
+        abort_reason = "mismatch" if mismatch and step_prior.consecutive_mismatches > mismatch_tolerance else ""
+        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason=abort_reason)
     if continuation_rule == "motif_consistency":
-        return (
-            stalled
-            and step_prior.consecutive_stalls > stall_tolerance
-        ) or (mismatch and step_prior.consecutive_mismatches > mismatch_tolerance)
+        if stalled and step_prior.consecutive_stalls > stall_tolerance:
+            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason="stall")
+        abort_reason = "mismatch" if mismatch and step_prior.consecutive_mismatches > mismatch_tolerance else ""
+        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason=abort_reason)
     if continuation_rule == "progress_guard":
         if stalled and step_prior.consecutive_stalls > stall_tolerance:
-            return True
-        return (
+            return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason="stall")
+        abort_reason = "progress_lost" if (
             mismatch
             and step_prior.consecutive_mismatches > mismatch_tolerance
             and not _has_progress_evidence(observed_signature)
-        )
+        ) else ""
+        return PriorStepAssessment(mismatch=mismatch, stalled=stalled, abort_reason=abort_reason)
 
     msg = f"Unknown prior continuation rule: {continuation_rule}"
     raise ValueError(msg)
+
+
+def _record_prior_step_assessment(
+    stats: PriorExecutionStats,
+    step_prior: ActivePriorExecution,
+    assessment: PriorStepAssessment,
+) -> None:
+    is_first_step = step_prior.executed_steps == 0
+    stats.executed_prior_steps += 1
+    if assessment.mismatch:
+        stats.mismatched_prior_steps += 1
+        if is_first_step:
+            stats.first_step_mismatch_count += 1
+    if assessment.stalled:
+        stats.stalled_prior_steps += 1
+        if is_first_step:
+            stats.first_step_stall_count += 1
+
+
+def _record_prior_abort(stats: PriorExecutionStats, abort_reason: str) -> None:
+    stats.aborted_prior_count += 1
+    if abort_reason == "mismatch":
+        stats.mismatch_abort_count += 1
+    elif abort_reason == "stall":
+        stats.stall_abort_count += 1
+    elif abort_reason == "progress_lost":
+        stats.progress_lost_abort_count += 1
+    elif abort_reason:
+        msg = f"Unknown prior abort reason: {abort_reason}"
+        raise ValueError(msg)
 
 
 def _select_prior_for_execution(
@@ -756,10 +819,8 @@ def _run_episode(
                 action = agent.act(state, 0.0)
         previous_position = env.position
         next_state, reward, done, info = env.step(action)
-        if step_prior is not None and execution_stats is not None:
-            execution_stats.executed_prior_steps += 1
-        if step_prior is not None and expected_signature is not None:
-            should_abort = _should_abort_prior_execution(
+        if step_prior is not None:
+            assessment = _assess_prior_execution_step(
                 step_prior,
                 action,
                 expected_signature,
@@ -770,17 +831,19 @@ def _run_episode(
                 mismatch_tolerance,
                 continuation_rule,
                 stall_tolerance,
-                execution_stats,
             )
-            if should_abort:
-                if execution_stats is not None and step_prior.remaining_actions:
-                    execution_stats.aborted_prior_count += 1
+            if execution_stats is not None:
+                _record_prior_step_assessment(execution_stats, step_prior, assessment)
+            step_prior.executed_steps += 1
+            if assessment.abort_reason:
+                if execution_stats is not None:
+                    _record_prior_abort(execution_stats, assessment.abort_reason)
                     execution_stats.aborted_prior_steps += len(step_prior.remaining_actions)
                 active_prior = None
             elif step_prior is not None and not step_prior.remaining_actions:
+                if execution_stats is not None:
+                    execution_stats.completed_prior_count += 1
                 active_prior = None
-        elif step_prior is not None and not step_prior.remaining_actions:
-            active_prior = None
         if train:
             agent.update(state, action, reward, next_state, done)
         actions.append(action)
@@ -791,6 +854,8 @@ def _run_episode(
         state = next_state
         success = bool(info["success"])
         if done:
+            if active_prior is not None and active_prior.remaining_actions and execution_stats is not None:
+                execution_stats.truncated_prior_count += 1
             break
     return Rollout(
         states,

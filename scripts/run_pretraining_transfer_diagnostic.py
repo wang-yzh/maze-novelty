@@ -62,9 +62,16 @@ SUMMARY_METRICS = [
     "target_reuse_min_execution_support",
     "target_reuse_matched_prior_count",
     "target_reuse_executed_prior_count",
+    "target_reuse_completed_prior_count",
+    "target_reuse_truncated_prior_count",
     "target_reuse_executed_prior_steps",
+    "target_reuse_first_step_mismatch_count",
+    "target_reuse_first_step_stall_count",
     "target_reuse_mismatched_prior_steps",
     "target_reuse_stalled_prior_steps",
+    "target_reuse_mismatch_abort_count",
+    "target_reuse_stall_abort_count",
+    "target_reuse_progress_lost_abort_count",
     "target_reuse_aborted_prior_count",
     "target_reuse_aborted_prior_steps",
     "target_reuse_mismatch_tolerance",
@@ -208,9 +215,16 @@ def main() -> None:
                                 "target_reuse_allow_trace_priors": reuse_config.allow_trace_priors,
                                 "target_reuse_matched_prior_count": reuse_summary.matched_prior_count,
                                 "target_reuse_executed_prior_count": reuse_summary.executed_prior_count,
+                                "target_reuse_completed_prior_count": reuse_summary.completed_prior_count,
+                                "target_reuse_truncated_prior_count": reuse_summary.truncated_prior_count,
                                 "target_reuse_executed_prior_steps": reuse_summary.executed_prior_steps,
+                                "target_reuse_first_step_mismatch_count": reuse_summary.first_step_mismatch_count,
+                                "target_reuse_first_step_stall_count": reuse_summary.first_step_stall_count,
                                 "target_reuse_mismatched_prior_steps": reuse_summary.mismatched_prior_steps,
                                 "target_reuse_stalled_prior_steps": reuse_summary.stalled_prior_steps,
+                                "target_reuse_mismatch_abort_count": reuse_summary.mismatch_abort_count,
+                                "target_reuse_stall_abort_count": reuse_summary.stall_abort_count,
+                                "target_reuse_progress_lost_abort_count": reuse_summary.progress_lost_abort_count,
                                 "target_reuse_aborted_prior_count": reuse_summary.aborted_prior_count,
                                 "target_reuse_aborted_prior_steps": reuse_summary.aborted_prior_steps,
                                 "target_reuse_executed_episode_count": reuse_summary.executed_episode_count,
@@ -325,9 +339,16 @@ def _report_row(
     row["target_reuse_allow_trace_priors"] = ""
     row["target_reuse_matched_prior_count"] = ""
     row["target_reuse_executed_prior_count"] = ""
+    row["target_reuse_completed_prior_count"] = ""
+    row["target_reuse_truncated_prior_count"] = ""
     row["target_reuse_executed_prior_steps"] = ""
+    row["target_reuse_first_step_mismatch_count"] = ""
+    row["target_reuse_first_step_stall_count"] = ""
     row["target_reuse_mismatched_prior_steps"] = ""
     row["target_reuse_stalled_prior_steps"] = ""
+    row["target_reuse_mismatch_abort_count"] = ""
+    row["target_reuse_stall_abort_count"] = ""
+    row["target_reuse_progress_lost_abort_count"] = ""
     row["target_reuse_aborted_prior_count"] = ""
     row["target_reuse_aborted_prior_steps"] = ""
     row["target_reuse_executed_episode_count"] = ""
