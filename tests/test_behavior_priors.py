@@ -15,9 +15,12 @@ from minigrid_encoders import DIRECTION_AGNOSTIC_MATCH, StateSignature
 from transfer.evaluator import (
     PriorExecutionStats,
     TargetReuseConfig,
+    TargetReuseItem,
     _accumulate_episode_diagnostics,
     _accumulate_execution_stats,
+    _build_prior_library,
     _run_episode,
+    _select_prior_for_execution,
     _target_reuse_priors,
 )
 
@@ -110,6 +113,128 @@ def test_behavior_library_best_match_respects_match_mode() -> None:
     query = _signature(direction=2, last_action=3)
     assert strict_library.best_match(query) is None
     assert agnostic_library.best_match(query) is not None
+
+
+def test_motif_fragment_library_filters_trace_priors_and_low_support() -> None:
+    motif_prior = BehaviorPrior(
+        kind="forward_run",
+        initiation=_signature(direction=0, last_action=3),
+        action_trace=(2, 2),
+        termination=_signature(direction=0, last_action=2),
+        score=0.70,
+        support=2,
+        state_trace=(0, 1, 2),
+        signature_trace=(_signature(direction=0, last_action=3), _signature(direction=0, last_action=2), _signature(direction=0, last_action=2)),
+    )
+    low_support_prior = BehaviorPrior(
+        kind="region_transition",
+        initiation=_signature(direction=0, last_action=3),
+        action_trace=(1, 2),
+        termination=_signature(direction=0, last_action=2),
+        score=0.80,
+        support=1,
+        state_trace=(3, 4, 5),
+        signature_trace=(_signature(direction=0, last_action=3), _signature(direction=0, last_action=1), _signature(direction=0, last_action=2)),
+    )
+    trace_prior = BehaviorPrior(
+        kind="target_trace",
+        initiation=_signature(direction=0, last_action=3),
+        action_trace=(2, 2),
+        termination=_signature(direction=0, last_action=2),
+        score=0.95,
+        support=5,
+        state_trace=(6, 7, 8),
+        signature_trace=(_signature(direction=0, last_action=3), _signature(direction=0, last_action=2), _signature(direction=0, last_action=2)),
+    )
+    config = TargetReuseConfig(
+        execution_mode="motif_fragments",
+        min_execution_support=2,
+        allow_trace_priors=False,
+        match_mode=DIRECTION_AGNOSTIC_MATCH,
+    )
+
+    library = _build_prior_library(
+        [
+            TargetReuseItem(motif_prior),
+            TargetReuseItem(low_support_prior),
+            TargetReuseItem(trace_prior),
+        ],
+        config,
+    )
+
+    assert library is not None
+    assert len(library.priors) == 1
+    assert library.priors[0].kind == "forward_run"
+
+
+def test_motif_fragment_library_falls_back_when_high_support_fragments_are_absent() -> None:
+    low_support_motif = BehaviorPrior(
+        kind="forward_run",
+        initiation=_signature(direction=0, last_action=3),
+        action_trace=(2, 2),
+        termination=_signature(direction=0, last_action=2),
+        score=0.70,
+        support=1,
+        state_trace=(0, 1, 2),
+        signature_trace=(_signature(direction=0, last_action=3), _signature(direction=0, last_action=2), _signature(direction=0, last_action=2)),
+    )
+    config = TargetReuseConfig(
+        execution_mode="motif_fragments",
+        min_execution_support=2,
+        allow_trace_priors=False,
+        match_mode=DIRECTION_AGNOSTIC_MATCH,
+    )
+
+    library = _build_prior_library([TargetReuseItem(low_support_motif)], config)
+
+    assert library is not None
+    assert len(library.priors) == 1
+    assert library.priors[0].kind == "forward_run"
+
+
+def test_motif_fragment_selection_prefers_supported_shorter_prior() -> None:
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    query = _signature(direction=1, last_action=3)
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=_signature(direction=0, last_action=3),
+            action_trace=(2, 2, 2, 2),
+            termination=_signature(direction=0, last_action=2),
+            score=0.95,
+            support=1,
+            state_trace=(0, 1, 2, 3, 4),
+            signature_trace=(
+                _signature(direction=0, last_action=3),
+                _signature(direction=0, last_action=2),
+                _signature(direction=0, last_action=2),
+                _signature(direction=0, last_action=2),
+                _signature(direction=0, last_action=2),
+            ),
+        )
+    )
+    library.add(
+        BehaviorPrior(
+            kind="forward_run",
+            initiation=_signature(direction=0, last_action=3),
+            action_trace=(2, 2),
+            termination=_signature(direction=0, last_action=2),
+            score=0.80,
+            support=3,
+            state_trace=(5, 6, 7),
+            signature_trace=(
+                _signature(direction=0, last_action=3),
+                _signature(direction=0, last_action=2),
+                _signature(direction=0, last_action=2),
+            ),
+        )
+    )
+
+    selected = _select_prior_for_execution(library, query, "motif_fragments")
+
+    assert selected is not None
+    assert selected.action_trace == (2, 2)
+    assert selected.support == 3
 
 
 def test_target_reuse_extracts_navigation_prior_from_rollout() -> None:

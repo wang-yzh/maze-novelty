@@ -34,9 +34,12 @@ class TargetReuseConfig:
     probe_episodes: int = 6
     probe_epsilon: float = 0.03
     match_mode: str = "strict"
+    execution_mode: str = "default"
     min_subgoal_score: float = 0.018
     min_mobility: float = 0.035
     min_prior_quality: float = 0.28
+    min_execution_support: int = 1
+    allow_trace_priors: bool = True
     max_motifs_per_rollout: int = 3
     max_library_items: int = 24
     reinforce_passes: int = 4
@@ -228,10 +231,15 @@ def evaluate_transfer_with_target_reuse(
             execution_stats.idle_episode_count,
         ),
     )
-    execution_mode = (
+    abort_mode = (
         f"abort_t{reuse_config.mismatch_tolerance}"
         if reuse_config.abort_on_mismatch
         else "open_loop"
+    )
+    execution_mode = (
+        abort_mode
+        if reuse_config.execution_mode == "default"
+        else f"{abort_mode}|{reuse_config.execution_mode}"
     )
     return (
         TransferReport(
@@ -292,11 +300,7 @@ def adapt_agent(
     points = [_adaptation_point(spec, agent, seed + 10000, 0, config.eval_episodes)]
     execution_stats = PriorExecutionStats()
     reuse_horizon = int(config.episodes * (reuse_config.early_fraction if reuse_config is not None else 0.0))
-    prior_library = _build_prior_library(
-        reuse_items,
-        reuse_config.max_library_items if reuse_config is not None else 0,
-        reuse_config.match_mode if reuse_config is not None else "strict",
-    )
+    prior_library = _build_prior_library(reuse_items, reuse_config) if reuse_config is not None else None
     for episode in range(1, config.episodes + 1):
         use_priors = bool(reuse_items and reuse_config is not None and episode <= reuse_horizon)
         active_reuse_items = reuse_items if use_priors else None
@@ -314,6 +318,7 @@ def adapt_agent(
             epsilon=config.epsilon,
             train=True,
             prior_library=prior_library if use_priors else None,
+            execution_mode=active_reuse_config.execution_mode if active_reuse_config is not None else "default",
             prior_execute_prob=active_reuse_config.execute_probability if active_reuse_config is not None else 0.0,
             execute_max_actions=active_reuse_config.execute_max_actions if active_reuse_config is not None else 0,
             abort_on_mismatch=active_reuse_config.abort_on_mismatch if active_reuse_config is not None else False,
@@ -484,15 +489,42 @@ def _fallback_trace_prior(
 
 def _build_prior_library(
     reuse_items: list[TargetReuseItem] | None,
-    max_items: int,
-    match_mode: str,
+    config: TargetReuseConfig,
 ) -> BehaviorLibrary | None:
-    if not reuse_items or max_items <= 0:
+    if not reuse_items or config.max_library_items <= 0:
         return None
-    library = BehaviorLibrary(max_items=max_items, match_mode=match_mode)
-    for item in reuse_items:
-        library.add(item.prior)
-    return library
+    if config.execution_mode != "motif_fragments":
+        library = BehaviorLibrary(max_items=config.max_library_items, match_mode=config.match_mode)
+        for item in reuse_items:
+            prior = item.prior
+            if not config.allow_trace_priors and prior.kind == "target_trace":
+                continue
+            if prior.support < config.min_execution_support:
+                continue
+            library.add(prior)
+        return library if len(library) else None
+
+    # Motif-fragment mode should prefer repeated non-fallback fragments, but it
+    # should not go silent if the budget is too small for high-support motifs.
+    filter_stages = (
+        (False, max(2, config.min_execution_support)),
+        (False, 1),
+        (True, 1),
+    )
+    for allow_trace_priors, min_support in filter_stages:
+        library = BehaviorLibrary(max_items=config.max_library_items, match_mode=config.match_mode)
+        for item in reuse_items:
+            prior = item.prior
+            if not allow_trace_priors and prior.kind == "target_trace":
+                continue
+            if prior.support < min_support:
+                continue
+            shortness_bonus = 0.04 * max(0.0, (6 - min(6, len(prior.action_trace))) / 6.0)
+            support_bonus = 0.03 * min(3, max(0, prior.support - 1))
+            library.add(replace(prior, score=min(1.0, prior.score + shortness_bonus + support_bonus)))
+        if len(library):
+            return library
+    return None
 
 
 def _accumulate_execution_stats(
@@ -573,6 +605,23 @@ def _make_active_prior_execution(
     )
 
 
+def _select_prior_for_execution(
+    prior_library: BehaviorLibrary,
+    signature: StateSignature,
+    execution_mode: str,
+) -> BehaviorPrior | None:
+    if execution_mode == "motif_fragments":
+        candidates = [
+            prior
+            for prior in prior_library.priors
+            if prior.matches(signature, mode=prior_library.match_mode)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda prior: (prior.support, -len(prior.action_trace), prior.score))
+    return prior_library.best_match(signature)
+
+
 def _run_episode(
     env: MiniGridTabularEnv,
     agent: QAgent,
@@ -580,6 +629,7 @@ def _run_episode(
     epsilon: float,
     train: bool,
     prior_library: BehaviorLibrary | None = None,
+    execution_mode: str = "default",
     prior_execute_prob: float = 0.0,
     execute_max_actions: int = 0,
     abort_on_mismatch: bool = False,
@@ -607,7 +657,7 @@ def _run_episode(
         else:
             matched_prior = None
             if prior_library is not None and prior_execute_prob > 0.0:
-                matched_prior = prior_library.best_match(env.state_signature)
+                matched_prior = _select_prior_for_execution(prior_library, env.state_signature, execution_mode)
                 if matched_prior is not None and execution_stats is not None:
                     execution_stats.matched_prior_count += 1
             if matched_prior is not None and rng.random() < prior_execute_prob and matched_prior.action_trace:

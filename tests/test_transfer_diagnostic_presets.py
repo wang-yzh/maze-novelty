@@ -26,6 +26,9 @@ def test_uniform_preset_uses_cli_values() -> None:
     assert config["match_mode"] == "direction_agnostic"
     assert config["abort_on_mismatch"] is True
     assert config["mismatch_tolerance"] == 2
+    assert config["execution_mode"] == "default"
+    assert config["min_execution_support"] == 1
+    assert config["allow_trace_priors"] is True
     assert config["reinforce_passes"] == 5
     assert config["reward"] == 0.09
 
@@ -46,7 +49,12 @@ def test_branch_specific_preset_selects_method_defaults() -> None:
 
     assert operate["abort_on_mismatch"] is False
     assert operate["mismatch_tolerance"] == 0
+    assert operate["execution_mode"] == "default"
     assert motif["abort_on_mismatch"] is True
     assert motif["mismatch_tolerance"] == 1
+    assert motif["execution_mode"] == "motif_fragments"
+    assert motif["min_execution_support"] == 2
+    assert motif["allow_trace_priors"] is False
     assert subgoal["abort_on_mismatch"] is True
     assert subgoal["mismatch_tolerance"] == 1
+    assert subgoal["execution_mode"] == "default"

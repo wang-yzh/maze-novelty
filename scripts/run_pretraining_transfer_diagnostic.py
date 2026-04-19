@@ -59,6 +59,7 @@ SUMMARY_METRICS = [
     "target_reuse_best_item_score",
     "target_reuse_avg_prior_support",
     "target_reuse_best_prior_support",
+    "target_reuse_min_execution_support",
     "target_reuse_matched_prior_count",
     "target_reuse_executed_prior_count",
     "target_reuse_executed_prior_steps",
@@ -192,6 +193,9 @@ def main() -> None:
                                 "target_reuse_best_item_score": reuse_summary.best_item_score,
                                 "target_reuse_avg_prior_support": reuse_summary.avg_prior_support,
                                 "target_reuse_best_prior_support": reuse_summary.best_prior_support,
+                                "target_reuse_execution_mode": reuse_config.execution_mode,
+                                "target_reuse_min_execution_support": reuse_config.min_execution_support,
+                                "target_reuse_allow_trace_priors": reuse_config.allow_trace_priors,
                                 "target_reuse_matched_prior_count": reuse_summary.matched_prior_count,
                                 "target_reuse_executed_prior_count": reuse_summary.executed_prior_count,
                                 "target_reuse_executed_prior_steps": reuse_summary.executed_prior_steps,
@@ -224,6 +228,9 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
         "match_mode": reuse_match_mode,
         "abort_on_mismatch": args.reuse_abort_on_mismatch,
         "mismatch_tolerance": args.reuse_mismatch_tolerance,
+        "execution_mode": "default",
+        "min_execution_support": 1,
+        "allow_trace_priors": True,
         "reinforce_passes": args.reuse_reinforce_passes,
         "reward": args.reuse_reward,
     }
@@ -235,12 +242,27 @@ def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[
             **base,
             "abort_on_mismatch": False,
             "mismatch_tolerance": 0,
+            "execution_mode": "default",
+            "min_execution_support": 1,
+            "allow_trace_priors": True,
         }
-    if method in {"cyclic_motif_fast_replay_pretrain", "cyclic_subgoal_ecology_replay_pretrain"}:
+    if method == "cyclic_motif_fast_replay_pretrain":
         return {
             **base,
             "abort_on_mismatch": True,
             "mismatch_tolerance": 1,
+            "execution_mode": "motif_fragments",
+            "min_execution_support": 2,
+            "allow_trace_priors": False,
+        }
+    if method == "cyclic_subgoal_ecology_replay_pretrain":
+        return {
+            **base,
+            "abort_on_mismatch": True,
+            "mismatch_tolerance": 1,
+            "execution_mode": "default",
+            "min_execution_support": 1,
+            "allow_trace_priors": True,
         }
     return base
 
@@ -276,6 +298,9 @@ def _report_row(
     row["target_reuse_best_item_score"] = ""
     row["target_reuse_avg_prior_support"] = ""
     row["target_reuse_best_prior_support"] = ""
+    row["target_reuse_execution_mode"] = ""
+    row["target_reuse_min_execution_support"] = ""
+    row["target_reuse_allow_trace_priors"] = ""
     row["target_reuse_matched_prior_count"] = ""
     row["target_reuse_executed_prior_count"] = ""
     row["target_reuse_executed_prior_steps"] = ""
