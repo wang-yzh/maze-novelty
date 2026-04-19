@@ -98,6 +98,7 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=0.10)
     parser.add_argument("--methods", default=DEFAULT_METHODS)
     parser.add_argument("--include-target-reuse", action="store_true")
+    parser.add_argument("--reuse-preset-mode", choices=["uniform", "branch_specific"], default="uniform")
     parser.add_argument("--reuse-match-modes", default="strict")
     parser.add_argument("--reuse-abort-on-mismatch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--reuse-mismatch-tolerance", type=int, default=0)
@@ -160,12 +161,7 @@ def main() -> None:
                 if args.include_target_reuse:
                     for reuse_idx, reuse_match_mode in enumerate(reuse_match_modes):
                         reuse_config = TargetReuseConfig(
-                            probe_episodes=args.reuse_probe_episodes,
-                            match_mode=reuse_match_mode,
-                            abort_on_mismatch=args.reuse_abort_on_mismatch,
-                            mismatch_tolerance=args.reuse_mismatch_tolerance,
-                            reinforce_passes=args.reuse_reinforce_passes,
-                            reward=args.reuse_reward,
+                            **_reuse_config_kwargs(args, artifact.method, reuse_match_mode)
                         )
                         reuse_report, _reuse_points, reuse_summary = evaluate_transfer_with_target_reuse(
                             artifact,
@@ -187,6 +183,7 @@ def main() -> None:
                             seed,
                             reuse_probe,
                             {
+                                "target_reuse_preset_mode": args.reuse_preset_mode,
                                 "target_reuse_match_mode": reuse_match_mode,
                                 "target_reuse_abort_on_mismatch": args.reuse_abort_on_mismatch,
                                 "target_reuse_mismatch_tolerance": args.reuse_mismatch_tolerance,
@@ -221,6 +218,33 @@ def main() -> None:
     print(f"Wrote {args.summary_output}")
 
 
+def _reuse_config_kwargs(args: Any, method: str, reuse_match_mode: str) -> dict[str, Any]:
+    base = {
+        "probe_episodes": args.reuse_probe_episodes,
+        "match_mode": reuse_match_mode,
+        "abort_on_mismatch": args.reuse_abort_on_mismatch,
+        "mismatch_tolerance": args.reuse_mismatch_tolerance,
+        "reinforce_passes": args.reuse_reinforce_passes,
+        "reward": args.reuse_reward,
+    }
+    if getattr(args, "reuse_preset_mode", "uniform") != "branch_specific":
+        return base
+
+    if method == "operate_replay_pretrain":
+        return {
+            **base,
+            "abort_on_mismatch": False,
+            "mismatch_tolerance": 0,
+        }
+    if method in {"cyclic_motif_fast_replay_pretrain", "cyclic_subgoal_ecology_replay_pretrain"}:
+        return {
+            **base,
+            "abort_on_mismatch": True,
+            "mismatch_tolerance": 1,
+        }
+    return base
+
+
 def _report_row(
     report,
     metadata: dict[str, Any],
@@ -243,6 +267,7 @@ def _report_row(
     row["target_probe_new_regions"] = ""
     row["target_probe_mobility"] = ""
     row["target_probe_success"] = ""
+    row["target_reuse_preset_mode"] = ""
     row["target_reuse_match_mode"] = ""
     row["target_reuse_abort_on_mismatch"] = ""
     row["target_reuse_mismatch_tolerance"] = ""
