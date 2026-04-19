@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from agents import QAgent, Rollout
 from core.behavior import BehaviorLibrary, BehaviorPrior
-from minigrid_encoders import StateSignature
+from minigrid_encoders import DIRECTION_AGNOSTIC_MATCH, StateSignature
 from transfer.evaluator import (
     PriorExecutionStats,
     TargetReuseConfig,
@@ -23,10 +23,11 @@ from transfer.evaluator import (
 
 
 def test_state_signature_matching_is_goal_and_last_action_tolerant() -> None:
-    reference = _signature(last_action=3, goal_bin=4)
-    candidate = _signature(last_action=1, goal_bin=0)
+    reference = _signature(direction=0, last_action=3, goal_bin=4)
+    candidate = _signature(direction=1, last_action=1, goal_bin=0)
 
-    assert reference.matches(candidate)
+    assert not reference.matches(candidate)
+    assert reference.matches(candidate, mode=DIRECTION_AGNOSTIC_MATCH)
 
 
 def test_behavior_library_merges_duplicate_priors() -> None:
@@ -60,6 +61,55 @@ def test_behavior_library_merges_duplicate_priors() -> None:
     assert merged.support == 2
     assert np.isclose(merged.score, 0.60)
     assert merged.state_trace == high_score.state_trace
+
+
+def test_behavior_library_merges_direction_variants_in_direction_agnostic_mode() -> None:
+    library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    low = BehaviorPrior(
+        kind="forward_run",
+        initiation=_signature(direction=0, last_action=3),
+        action_trace=(2, 2),
+        termination=_signature(direction=0, last_action=2),
+        score=0.50,
+        support=1,
+        state_trace=(0, 1, 2),
+    )
+    high = BehaviorPrior(
+        kind="forward_run",
+        initiation=_signature(direction=2, last_action=3),
+        action_trace=(2, 2),
+        termination=_signature(direction=2, last_action=2),
+        score=0.90,
+        support=1,
+        state_trace=(5, 6, 7),
+    )
+
+    library.add(low)
+    library.add(high)
+
+    assert len(library) == 1
+    assert library.priors[0].support == 2
+    assert library.priors[0].state_trace == high.state_trace
+
+
+def test_behavior_library_best_match_respects_match_mode() -> None:
+    prior = BehaviorPrior(
+        kind="forward_run",
+        initiation=_signature(direction=0, last_action=3),
+        action_trace=(2, 2),
+        termination=_signature(direction=0, last_action=2),
+        score=0.70,
+        support=1,
+        state_trace=(0, 1, 2),
+    )
+    strict_library = BehaviorLibrary(max_items=4, match_mode="strict")
+    agnostic_library = BehaviorLibrary(max_items=4, match_mode=DIRECTION_AGNOSTIC_MATCH)
+    strict_library.add(prior)
+    agnostic_library.add(prior)
+
+    query = _signature(direction=2, last_action=3)
+    assert strict_library.best_match(query) is None
+    assert agnostic_library.best_match(query) is not None
 
 
 def test_target_reuse_extracts_navigation_prior_from_rollout() -> None:
@@ -168,9 +218,9 @@ def test_episode_diagnostics_separate_executed_from_idle_prior_episodes() -> Non
     assert aggregate.executed_episode_region_transition_total >= aggregate.idle_episode_region_transition_total
 
 
-def _signature(last_action: int, goal_bin: int = 4) -> StateSignature:
+def _signature(direction: int = 0, last_action: int = 3, goal_bin: int = 4) -> StateSignature:
     return StateSignature(
-        direction=0,
+        direction=direction,
         local_shape=(0, 0, 0, 1, 1),
         goal_bin=goal_bin,
         topology=2,

@@ -6,6 +6,9 @@ from typing import Protocol
 import numpy as np
 from minigrid.core.constants import OBJECT_TO_IDX
 
+STRICT_MATCH = "strict"
+DIRECTION_AGNOSTIC_MATCH = "direction_agnostic"
+
 
 @dataclass(frozen=True)
 class StateSignature:
@@ -15,16 +18,32 @@ class StateSignature:
     topology: int
     last_action: int
 
-    def matches(self, other: "StateSignature") -> bool:
+    def matches(self, other: "StateSignature", mode: str = STRICT_MATCH) -> bool:
         goal_compatible = self.goal_bin == other.goal_bin or self.goal_bin == 4 or other.goal_bin == 4
         action_compatible = self.last_action == other.last_action or self.last_action == 3 or other.last_action == 3
+        direction_compatible = self._direction_matches(other, mode)
         return (
-            self.direction == other.direction
+            direction_compatible
             and self.local_shape == other.local_shape
             and self.topology == other.topology
             and action_compatible
             and goal_compatible
         )
+
+    def canonical_key(self, mode: str = STRICT_MATCH) -> tuple[int, tuple[int, int, int, int, int], int, int, int]:
+        direction = self.direction if mode == STRICT_MATCH else -1 if mode == DIRECTION_AGNOSTIC_MATCH else None
+        if direction is None:
+            msg = f"Unknown StateSignature match mode: {mode}"
+            raise ValueError(msg)
+        return (direction, self.local_shape, self.goal_bin, self.topology, self.last_action)
+
+    def _direction_matches(self, other: "StateSignature", mode: str) -> bool:
+        if mode == STRICT_MATCH:
+            return self.direction == other.direction
+        if mode == DIRECTION_AGNOSTIC_MATCH:
+            return True
+        msg = f"Unknown StateSignature match mode: {mode}"
+        raise ValueError(msg)
 
 
 class MiniGridStateEncoder(Protocol):

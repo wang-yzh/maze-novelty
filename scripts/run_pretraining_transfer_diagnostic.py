@@ -95,6 +95,7 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=0.10)
     parser.add_argument("--methods", default=DEFAULT_METHODS)
     parser.add_argument("--include-target-reuse", action="store_true")
+    parser.add_argument("--reuse-match-modes", default="strict")
     parser.add_argument("--reuse-probe-episodes", type=int, default=6)
     parser.add_argument("--reuse-reinforce-passes", type=int, default=4)
     parser.add_argument("--reuse-reward", type=float, default=0.075)
@@ -109,6 +110,7 @@ def main() -> None:
     seeds = [int(seed.strip()) for seed in args.seeds.split(",") if seed.strip()]
     methods = [method.strip() for method in args.methods.split(",") if method.strip()]
     target_envs = [env.strip() for env in args.target_envs.split(",") if env.strip()] or [args.target_env]
+    reuse_match_modes = [mode.strip() for mode in args.reuse_match_modes.split(",") if mode.strip()]
     rows: list[dict[str, Any]] = []
 
     for seed in seeds:
@@ -133,11 +135,6 @@ def main() -> None:
                 epsilon=args.adapt_epsilon,
                 threshold=args.threshold,
             )
-            reuse_config = TargetReuseConfig(
-                probe_episodes=args.reuse_probe_episodes,
-                reinforce_passes=args.reuse_reinforce_passes,
-                reward=args.reuse_reward,
-            )
             scratch_report, _scratch_points = evaluate_scratch(target_spec, seed + 1000 + target_idx * 10000, config)
             scratch_row = _report_row(scratch_report, {}, seed)
             rows.append(scratch_row)
@@ -156,47 +153,55 @@ def main() -> None:
                 rows.append(row)
                 print(_format_progress(row))
                 if args.include_target_reuse:
-                    reuse_report, _reuse_points, reuse_summary = evaluate_transfer_with_target_reuse(
-                        artifact,
-                        target_spec,
-                        seed + 6000 + target_idx * 10000 + idx * 100,
-                        config,
-                        reuse_config,
-                        scratch_final_score=scratch_report.final_score,
-                    )
-                    reuse_probe = _target_probe(
-                        target_spec,
-                        artifact.best_agent(),
-                        seed + 5000 + target_idx * 10000 + idx * 100,
-                        args.eval_episodes,
-                    )
-                    reuse_row = _report_row(
-                        reuse_report,
-                        artifact.metadata,
-                        seed,
-                        reuse_probe,
-                        {
-                            "target_reuse_item_count": reuse_summary.item_count,
-                            "target_reuse_avg_item_score": reuse_summary.avg_item_score,
-                            "target_reuse_best_item_score": reuse_summary.best_item_score,
-                            "target_reuse_avg_prior_support": reuse_summary.avg_prior_support,
-                            "target_reuse_best_prior_support": reuse_summary.best_prior_support,
-                            "target_reuse_matched_prior_count": reuse_summary.matched_prior_count,
-                            "target_reuse_executed_prior_count": reuse_summary.executed_prior_count,
-                            "target_reuse_executed_prior_steps": reuse_summary.executed_prior_steps,
-                            "target_reuse_executed_episode_count": reuse_summary.executed_episode_count,
-                            "target_reuse_idle_episode_count": reuse_summary.idle_episode_count,
-                            "target_reuse_executed_episode_avg_subgoal_score": reuse_summary.executed_episode_avg_subgoal_score,
-                            "target_reuse_executed_episode_avg_region_transitions": reuse_summary.executed_episode_avg_region_transitions,
-                            "target_reuse_executed_episode_avg_mobility": reuse_summary.executed_episode_avg_mobility,
-                            "target_reuse_idle_episode_avg_subgoal_score": reuse_summary.idle_episode_avg_subgoal_score,
-                            "target_reuse_idle_episode_avg_region_transitions": reuse_summary.idle_episode_avg_region_transitions,
-                            "target_reuse_idle_episode_avg_mobility": reuse_summary.idle_episode_avg_mobility,
-                            "target_reuse_probe_success": reuse_summary.probe_success_rate,
-                        },
-                    )
-                    rows.append(reuse_row)
-                    print(_format_progress(reuse_row))
+                    for reuse_idx, reuse_match_mode in enumerate(reuse_match_modes):
+                        reuse_config = TargetReuseConfig(
+                            probe_episodes=args.reuse_probe_episodes,
+                            match_mode=reuse_match_mode,
+                            reinforce_passes=args.reuse_reinforce_passes,
+                            reward=args.reuse_reward,
+                        )
+                        reuse_report, _reuse_points, reuse_summary = evaluate_transfer_with_target_reuse(
+                            artifact,
+                            target_spec,
+                            seed + 6000 + target_idx * 10000 + idx * 100 + reuse_idx * 10,
+                            config,
+                            reuse_config,
+                            scratch_final_score=scratch_report.final_score,
+                        )
+                        reuse_probe = _target_probe(
+                            target_spec,
+                            artifact.best_agent(),
+                            seed + 5000 + target_idx * 10000 + idx * 100,
+                            args.eval_episodes,
+                        )
+                        reuse_row = _report_row(
+                            reuse_report,
+                            artifact.metadata,
+                            seed,
+                            reuse_probe,
+                            {
+                                "target_reuse_match_mode": reuse_match_mode,
+                                "target_reuse_item_count": reuse_summary.item_count,
+                                "target_reuse_avg_item_score": reuse_summary.avg_item_score,
+                                "target_reuse_best_item_score": reuse_summary.best_item_score,
+                                "target_reuse_avg_prior_support": reuse_summary.avg_prior_support,
+                                "target_reuse_best_prior_support": reuse_summary.best_prior_support,
+                                "target_reuse_matched_prior_count": reuse_summary.matched_prior_count,
+                                "target_reuse_executed_prior_count": reuse_summary.executed_prior_count,
+                                "target_reuse_executed_prior_steps": reuse_summary.executed_prior_steps,
+                                "target_reuse_executed_episode_count": reuse_summary.executed_episode_count,
+                                "target_reuse_idle_episode_count": reuse_summary.idle_episode_count,
+                                "target_reuse_executed_episode_avg_subgoal_score": reuse_summary.executed_episode_avg_subgoal_score,
+                                "target_reuse_executed_episode_avg_region_transitions": reuse_summary.executed_episode_avg_region_transitions,
+                                "target_reuse_executed_episode_avg_mobility": reuse_summary.executed_episode_avg_mobility,
+                                "target_reuse_idle_episode_avg_subgoal_score": reuse_summary.idle_episode_avg_subgoal_score,
+                                "target_reuse_idle_episode_avg_region_transitions": reuse_summary.idle_episode_avg_region_transitions,
+                                "target_reuse_idle_episode_avg_mobility": reuse_summary.idle_episode_avg_mobility,
+                                "target_reuse_probe_success": reuse_summary.probe_success_rate,
+                            },
+                        )
+                        rows.append(reuse_row)
+                        print(_format_progress(reuse_row))
 
     summary_rows = _summary_rows(rows)
     _write_csv(args.output, rows)
@@ -227,6 +232,7 @@ def _report_row(
     row["target_probe_new_regions"] = ""
     row["target_probe_mobility"] = ""
     row["target_probe_success"] = ""
+    row["target_reuse_match_mode"] = ""
     row["target_reuse_item_count"] = ""
     row["target_reuse_avg_item_score"] = ""
     row["target_reuse_best_item_score"] = ""

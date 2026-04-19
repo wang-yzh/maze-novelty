@@ -32,6 +32,7 @@ class AdaptationConfig:
 class TargetReuseConfig:
     probe_episodes: int = 6
     probe_epsilon: float = 0.03
+    match_mode: str = "strict"
     min_subgoal_score: float = 0.018
     min_mobility: float = 0.035
     min_prior_quality: float = 0.28
@@ -211,7 +212,7 @@ def evaluate_transfer_with_target_reuse(
     )
     return (
         TransferReport(
-            method=f"{artifact.method}+target_reuse",
+            method=f"{artifact.method}+target_reuse[{reuse_config.match_mode}]",
             source_env=artifact.source_env,
             target_env=target_spec.env_id,
             seed=seed,
@@ -268,7 +269,11 @@ def adapt_agent(
     points = [_adaptation_point(spec, agent, seed + 10000, 0, config.eval_episodes)]
     execution_stats = PriorExecutionStats()
     reuse_horizon = int(config.episodes * (reuse_config.early_fraction if reuse_config is not None else 0.0))
-    prior_library = _build_prior_library(reuse_items, reuse_config.max_library_items if reuse_config is not None else 0)
+    prior_library = _build_prior_library(
+        reuse_items,
+        reuse_config.max_library_items if reuse_config is not None else 0,
+        reuse_config.match_mode if reuse_config is not None else "strict",
+    )
     for episode in range(1, config.episodes + 1):
         use_priors = bool(reuse_items and reuse_config is not None and episode <= reuse_horizon)
         active_reuse_items = reuse_items if use_priors else None
@@ -311,7 +316,7 @@ def build_target_reuse_items(
 ) -> tuple[list[TargetReuseItem], TargetReuseSummary]:
     rng = np.random.default_rng(seed)
     env = MiniGridTabularEnv(spec)
-    library = BehaviorLibrary(max_items=config.max_library_items)
+    library = BehaviorLibrary(max_items=config.max_library_items, match_mode=config.match_mode)
     successes = 0
     for idx in range(config.probe_episodes):
         env.episode_seed = seed + idx
@@ -453,10 +458,11 @@ def _fallback_trace_prior(
 def _build_prior_library(
     reuse_items: list[TargetReuseItem] | None,
     max_items: int,
+    match_mode: str,
 ) -> BehaviorLibrary | None:
     if not reuse_items or max_items <= 0:
         return None
-    library = BehaviorLibrary(max_items=max_items)
+    library = BehaviorLibrary(max_items=max_items, match_mode=match_mode)
     for item in reuse_items:
         library.add(item.prior)
     return library
