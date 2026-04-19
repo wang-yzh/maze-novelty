@@ -601,6 +601,27 @@ Region changes, prior executions, and other structural proxy metrics are now
 diagnostics only. They are not evidence of transfer benefit unless they predict
 task-level adaptation and beat scratch, shuffled, and random controls.
 
+### Untagged: `transfer ladder calibration`
+
+Added:
+
+- a transfer ladder calibration script;
+- target-level classification over longitudinal summary outputs;
+- explicit tiers for source-like regression, scratch domination,
+  control-confounding, all-zero hard targets, measurable candidates, and clean
+  candidate transfer signals.
+
+Purpose:
+
+The project needs targets that are neither too easy nor all-zero sparse. The new
+calibration layer screens candidate environments before more model changes.
+
+Lesson:
+
+The next benchmark should be selected for interpretability, not just difficulty.
+A useful target must distinguish real pretraining benefit from scratch luck,
+random-artifact movement, shuffled-prior movement, and total sparse failure.
+
 ## Current State
 
 Current branch:
