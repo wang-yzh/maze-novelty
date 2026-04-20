@@ -653,6 +653,29 @@ Dynamic-Obstacles is the best next confirmation family. SimpleCrossing is useful
 as a control-confounding detector, while MultiRoom remains too sparse under the
 current budget.
 
+### Untagged: `project closure`
+
+Recorded:
+
+- the decision to archive this repo as a historical research line;
+- the final project-closure document;
+- the shift away from pretraining-transfer as the active frame;
+- the shared playground virtualenv setup.
+
+Final answer:
+
+```text
+Maze Novelty created useful behavior structures and diagnostics.
+It did not show stable transfer benefit.
+It should not be the architecture for the new artificial-life project.
+```
+
+Lesson:
+
+The next project should make persistent populations, inheritance, and lineages
+the primary objects. Benchmarks can remain habitats, but they should not define
+the project.
+
 ## Current State
 
 Current branch:
@@ -665,6 +688,12 @@ Current latest tag:
 
 ```text
 v1.4.6-version-history-and-tests
+```
+
+Archive document:
+
+```text
+docs/project_closure_2026-04-20.md
 ```
 
 Current strongest historical ideas:
@@ -690,21 +719,31 @@ Current strongest historical ideas:
 
 ## Recommended Next Direction
 
-Do not add another large ecological cycle yet.
+Do not continue optimizing this repo.
 
-First stabilize a smaller research loop:
+The next active line should be a clean artificial-life project centered on:
 
 ```text
-pretrain artifact
-target probe
-candidate option extraction
-early adaptation with option/behavior prior
-transfer metrics
+World
+Habitat
+Population
+Organism
+Genome
+Lifetime
+Experience
+Inheritance
+Lineage
+Selection
+EcologicalMemory
 ```
 
-The next serious algorithmic question is:
+Historical code can be reused, especially MiniGrid adapters, motif vocabulary,
+and diagnostic discipline. The old benchmark-transfer architecture should not
+be carried forward unchanged.
+
+The next serious question is:
 
 ```text
-How should executed target-side priors change adaptation dynamics enough to
-create transferable success?
+How can lived experience become inheritable structure inside a persistent
+population?
 ```

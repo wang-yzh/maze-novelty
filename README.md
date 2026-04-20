@@ -1,5 +1,21 @@
 # Maze Novelty
 
+## Archive Notice
+
+This project was archived on 2026-04-20.
+
+It remains a historical record for cyclic novelty, motif replay, behavior-prior
+transfer, and transfer-ladder diagnostics. It is no longer the active research
+line. The next project should start from artificial-life population ontology:
+
+```text
+World -> Habitat -> Population -> Organism -> Lifetime -> Experience -> Inheritance -> Lineage
+```
+
+Closure note:
+
+- `docs/project_closure_2026-04-20.md`
+
 Maze Novelty is an experimental research repo for cyclic novelty, replay, motif
 memory, and transfer in small GridWorld and MiniGrid tasks.
 
