@@ -15,6 +15,7 @@ World -> Habitat -> Population -> Organism -> Lifetime -> Experience -> Inherita
 Closure note:
 
 - `docs/project_closure_2026-04-20.md`
+- `docs/archive/README.md`
 
 Maze Novelty is an experimental research repo for cyclic novelty, replay, motif
 memory, and transfer in small GridWorld and MiniGrid tasks.
@@ -190,6 +191,8 @@ Start here if you want the project story in order:
   Maintainer handoff for the current public branch state.
 - `docs/versioning.md`
   The repo's versioning and publishing discipline.
+- `docs/archive/README.md`
+  Archive navigation guide for reopening the repo later.
 
 ## Outputs
 
