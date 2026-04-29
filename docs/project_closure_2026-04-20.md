@@ -139,16 +139,17 @@ pyright: 0 errors
 ruff: passed
 ```
 
-The project environment now points at the shared playground environment:
+At the time of closure, the project used the shared playground environment:
 
 ```text
 /Users/qlqwpy/Documents/游乐园/.venv
 ```
 
-Local project symlink:
+That environment layout was later replaced by isolated per-project workspace
+envs under:
 
 ```text
-maze_novelty/.venv -> ../.venv
+/Users/qlqwpy/Documents/游乐园/.shared-envs/maze_novelty
 ```
 
 ## Future Use

@@ -105,6 +105,31 @@ docs/
 
 ## Quick Start
 
+## Environment
+
+This workspace currently uses:
+
+```text
+maze_novelty/.venv -> ../.shared-envs/maze_novelty
+```
+
+and a shared `uv` download/build cache:
+
+```text
+maze_novelty/uv.toml -> cache-dir = "../.uv-cache"
+```
+
+Implications:
+
+- `uv run ...` and `uv sync` inside this repo use the Maze-specific environment
+  under `/.shared-envs/maze_novelty`
+- the workspace-root `/.venv` is legacy backup only and should not be used as
+  the source of truth for this repo
+- from the workspace root, `./bin/park-env sync maze` is the safe way to
+  refresh this environment
+
+If you are working only inside this repo, the usual `uv` commands remain valid.
+
 Install dependencies:
 
 ```bash
